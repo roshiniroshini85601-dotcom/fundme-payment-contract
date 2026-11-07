@@ -101,11 +101,11 @@ describe("FundMePlatform Smart Contract & Security Suite", function () {
             assert.equal(ethCampaign[0], 0n); // id
             assert.equal(ethCampaign[1].toLowerCase(), creator.account.address.toLowerCase()); // creator
             assert.equal(ethCampaign[2], "0x0000000000000000000000000000000000000000"); // tokenAddress
-            assert.equal(ethCampaign[3], targetGoal); // targetGoal
-            assert.equal(ethCampaign[4], 0n); // totalRaised
-            assert.equal(ethCampaign[6], false); // isCompleted
-            assert.equal(ethCampaign[7], false); // isFlexible
-            assert.equal(ethCampaign[8], true); // exists
+            assert.equal(ethCampaign[4], false); // isCompleted
+            assert.equal(ethCampaign[5], false); // isFlexible
+            assert.equal(ethCampaign[6], true); // exists
+            assert.equal(ethCampaign[7], targetGoal); // targetGoal
+            assert.equal(ethCampaign[8], 0n); // totalRaised
 
             // Create ERC20 campaign (isFlexible = true)
             await platform.write.createCampaign(
@@ -116,7 +116,7 @@ describe("FundMePlatform Smart Contract & Security Suite", function () {
             const tokenCampaign = await platform.read.campaigns([1n]);
             assert.equal(tokenCampaign[0], 1n); // id
             assert.equal(tokenCampaign[2].toLowerCase(), mockToken.address.toLowerCase()); // tokenAddress
-            assert.equal(tokenCampaign[7], true); // isFlexible
+            assert.equal(tokenCampaign[5], true); // isFlexible
         });
 
         it("should process native ETH contributions via contributeETH", async () => {
@@ -133,7 +133,7 @@ describe("FundMePlatform Smart Contract & Security Suite", function () {
             await platform.write.contributeETH([0n], { account: donor1.account, value: contributeAmount });
 
             const campaign = await platform.read.campaigns([0n]);
-            assert.equal(campaign[4], contributeAmount); // totalRaised
+            assert.equal(campaign[8], contributeAmount); // totalRaised
 
             const donorContribution = await platform.read.contributions([0n, donor1.account.address]);
             assert.equal(donorContribution, contributeAmount);
@@ -160,7 +160,7 @@ describe("FundMePlatform Smart Contract & Security Suite", function () {
             await platform.write.contributeToken([0n, contributeAmount], { account: donor1.account });
 
             const campaign = await platform.read.campaigns([0n]);
-            assert.equal(campaign[4], contributeAmount); // totalRaised
+            assert.equal(campaign[8], contributeAmount); // totalRaised
 
             const contractBalance = await mockToken.read.balanceOf([platform.address]);
             assert.equal(contractBalance, contributeAmount);
@@ -254,7 +254,7 @@ describe("FundMePlatform Smart Contract & Security Suite", function () {
 
             // Fast-forward time past campaign deadline
             const ethCampaign = await platform.read.campaigns([0n]);
-            const deadline = BigInt(ethCampaign[5]); // deadline is at index 5
+            const deadline = BigInt(ethCampaign[3]); // deadline is at index 3 in packed struct
             await helpers.time.increaseTo(deadline + 1n);
 
             const pubClient = await viem.getPublicClient();
@@ -286,7 +286,7 @@ describe("FundMePlatform Smart Contract & Security Suite", function () {
             await platform.write.contributeETH([0n], { account: donor1.account, value: parseEther("1") });
 
             const campaign = await platform.read.campaigns([0n]);
-            const deadline = BigInt(campaign[5]);
+            const deadline = BigInt(campaign[3]); // deadline is at index 3 in packed struct
             await helpers.time.increaseTo(deadline + 1n);
 
             // Non-donor attempt -> revert ZeroContribution
@@ -386,5 +386,176 @@ describe("FundMePlatform Smart Contract & Security Suite", function () {
                 "TokenNotWhitelisted"
             );
         });
+
+        it("should freeze campaign, blocking donations/withdrawals while allowing donor refunds", async () => {
+            const { networkHelpers } = await network.create();
+            const { platform, creator, reviewer, donor1, viem } = await networkHelpers.loadFixture(deployFixture);
+
+            await platform.write.createCampaign(
+                ["0x0000000000000000000000000000000000000000", parseEther("5"), 10n, false],
+                { account: creator.account }
+            );
+
+            await platform.write.contributeETH([0n], { account: donor1.account, value: parseEther("1") });
+
+            // Reviewer freezes the campaign
+            await platform.write.setCampaignFrozen([0n, true], { account: reviewer.account });
+            assert.equal(await platform.read.isCampaignFrozen([0n]), true);
+
+            // Donations should revert
+            await viem.assertions.revertWithCustomError(
+                platform.write.contributeETH([0n], { account: donor1.account, value: parseEther("1") }),
+                platform,
+                "CampaignFrozen"
+            );
+
+            // Withdrawal should revert
+            await viem.assertions.revertWithCustomError(
+                platform.write.withdrawFunds([0n], { account: creator.account }),
+                platform,
+                "CampaignFrozen"
+            );
+
+            // Donor CAN claim refund immediately when frozen
+            const pubClient = await viem.getPublicClient();
+            const balBefore = await pubClient.getBalance({ address: donor1.account.address });
+            await platform.write.claimRefund([0n], { account: donor1.account });
+            const balAfter = await pubClient.getBalance({ address: donor1.account.address });
+            assert.ok(balAfter > balBefore);
+        });
+    });
+
+    describe("6. Gas Optimization Features & Batch Operations", function () {
+        it("should batch whitelist and de-whitelist tokens clearing storage", async () => {
+            const { networkHelpers } = await network.create();
+            const { platform, viem, owner } = await networkHelpers.loadFixture(deployFixture);
+
+            const tokenA = await viem.deployContract("MockERC20", ["Token A", "TKA"]);
+            const tokenB = await viem.deployContract("MockERC20", ["Token B", "TKB"]);
+
+            // Batch whitelist
+            await platform.write.batchWhitelistTokens([[tokenA.address, tokenB.address], true], { account: owner.account });
+            assert.equal(await platform.read.whitelistedTokens([tokenA.address]), true);
+            assert.equal(await platform.read.whitelistedTokens([tokenB.address]), true);
+
+            // Batch de-whitelist (clears storage)
+            await platform.write.batchWhitelistTokens([[tokenA.address, tokenB.address], false], { account: owner.account });
+            assert.equal(await platform.read.whitelistedTokens([tokenA.address]), false);
+            assert.equal(await platform.read.whitelistedTokens([tokenB.address]), false);
+        });
+
+        it("should batch refund multiple donors past deadline and clear storage", async () => {
+            const { networkHelpers } = await network.create();
+            const { platform, creator, donor1, donor2, viem, networkHelpers: helpers } = await networkHelpers.loadFixture(deployFixture);
+
+            const targetGoal = parseEther("10");
+            await platform.write.createCampaign(
+                ["0x0000000000000000000000000000000000000000", targetGoal, 5n, false],
+                { account: creator.account }
+            );
+
+            // Two donors contribute
+            await platform.write.contributeETH([0n], { account: donor1.account, value: parseEther("2") });
+            await platform.write.contributeETH([0n], { account: donor2.account, value: parseEther("3") });
+
+            // Fast forward past deadline
+            const ethCampaign = await platform.read.campaigns([0n]);
+            const deadline = BigInt(ethCampaign[3]);
+            await helpers.time.increaseTo(deadline + 1n);
+
+            const pubClient = await viem.getPublicClient();
+            const donor1BalBefore = await pubClient.getBalance({ address: donor1.account.address });
+            const donor2BalBefore = await pubClient.getBalance({ address: donor2.account.address });
+
+            // Batch refund
+            await platform.write.batchRefund([0n, [donor1.account.address, donor2.account.address]]);
+
+            const donor1BalAfter = await pubClient.getBalance({ address: donor1.account.address });
+            const donor2BalAfter = await pubClient.getBalance({ address: donor2.account.address });
+
+            assert.equal(donor1BalAfter - donor1BalBefore, parseEther("2"));
+            assert.equal(donor2BalAfter - donor2BalBefore, parseEther("3"));
+
+            // Verify storage cleared
+            assert.equal(await platform.read.contributions([0n, donor1.account.address]), 0n);
+            assert.equal(await platform.read.contributions([0n, donor2.account.address]), 0n);
+        });
+
+        it("should successfully batch refund valid donors even if one malicious donor reverts (DoS protection)", async () => {
+            const { networkHelpers } = await network.create();
+            const { platform, viem, creator, donor1, donor2, networkHelpers: helpers } = await networkHelpers.loadFixture(deployFixture);
+
+            // Deploy MockRejectEther
+            const rejectEther = await viem.deployContract("MockRejectEther", [platform.address]);
+
+            // Create campaign
+            await platform.write.createCampaign(["0x0000000000000000000000000000000000000000", parseEther("10"), 7n, false], { account: creator.account });
+
+            // Donor 1 (valid), RejectEther contract (malicious/reverting), Donor 2 (valid) donate
+            await platform.write.contributeETH([0n], { account: donor1.account, value: parseEther("1") });
+            await rejectEther.write.donate([0n], { value: parseEther("2") });
+            await platform.write.contributeETH([0n], { account: donor2.account, value: parseEther("3") });
+
+            // Fast forward past deadline using the fixture's helpers
+            const ethCampaign = await platform.read.campaigns([0n]);
+            await helpers.time.increaseTo(BigInt(ethCampaign[3]) + 1n);
+
+            const pubClient = await viem.getPublicClient();
+            const donor1BalBefore = await pubClient.getBalance({ address: donor1.account.address });
+            const donor2BalBefore = await pubClient.getBalance({ address: donor2.account.address });
+
+            // Batch refund including the reverting contract: donor1, rejectEther, donor2
+            await platform.write.batchRefund([0n, [donor1.account.address, rejectEther.address, donor2.account.address]]);
+
+            const donor1BalAfter = await pubClient.getBalance({ address: donor1.account.address });
+            const donor2BalAfter = await pubClient.getBalance({ address: donor2.account.address });
+
+            // Valid donors received their refunds!
+            assert.equal(donor1BalAfter - donor1BalBefore, parseEther("1"));
+            assert.equal(donor2BalAfter - donor2BalBefore, parseEther("3"));
+
+            // Valid donors' contribution storage is cleared
+            assert.equal(await platform.read.contributions([0n, donor1.account.address]), 0n);
+            assert.equal(await platform.read.contributions([0n, donor2.account.address]), 0n);
+
+            // The failing donor's contribution is safely preserved so funds are not lost
+            assert.equal(await platform.read.contributions([0n, rejectEther.address]), parseEther("2"));
+        });
+
+        it("should retrieve campaign via getCampaign view helper", async () => {
+            const { networkHelpers } = await network.create();
+            const { platform, creator } = await networkHelpers.loadFixture(deployFixture);
+
+            const targetGoal = parseEther("5");
+            await platform.write.createCampaign(
+                ["0x0000000000000000000000000000000000000000", targetGoal, 10n, true],
+                { account: creator.account }
+            );
+
+            const c = await platform.read.getCampaign([0n]);
+            assert.equal(c.id, 0n);
+            assert.equal(c.creator.toLowerCase(), creator.account.address.toLowerCase());
+            assert.equal(c.targetGoal, targetGoal);
+            assert.equal(c.isFlexible, true);
+            assert.equal(c.exists, true);
+        });
+
+        it("should clear KYC and whitelisted tokens storage when disabled", async () => {
+            const { networkHelpers } = await network.create();
+            const { platform, kycAdmin, creator, mockToken, owner } = await networkHelpers.loadFixture(deployFixture);
+
+            // Grant KYC
+            await platform.write.setKycStatus([creator.account.address, true], { account: kycAdmin.account });
+            assert.equal(await platform.read.isKycVerified([creator.account.address]), true);
+
+            // Revoke KYC (deletes storage slot)
+            await platform.write.setKycStatus([creator.account.address, false], { account: kycAdmin.account });
+            assert.equal(await platform.read.isKycVerified([creator.account.address]), false);
+
+            // Remove whitelisted token (deletes storage slot)
+            await platform.write.removeWhitelistedToken([mockToken.address], { account: owner.account });
+            assert.equal(await platform.read.whitelistedTokens([mockToken.address]), false);
+        });
     });
 });
+

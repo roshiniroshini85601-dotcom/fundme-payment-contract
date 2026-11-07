@@ -22,4 +22,5 @@ library FundMeErrors {
     error BeneficiaryTransferFailed();
     error RefundTransferFailed();
     error InvalidPrice();
+    error CampaignFrozen();
 }

@@ -4,16 +4,20 @@ pragma solidity ^0.8.20;
 /// @title IFundMePlatform
 /// @notice Interface for the FundMePlatform smart contract
 interface IFundMePlatform {
+    /// @notice Optimized packed campaign struct (reduces storage from 7 slots to 3 slots)
+    /// @dev Slot 0: id (12B) + creator (20B) = 32B
+    ///      Slot 1: tokenAddress (20B) + deadline (8B) + isCompleted (1B) + isFlexible (1B) + exists (1B) = 31B
+    ///      Slot 2: targetGoal (16B) + totalRaised (16B) = 32B
     struct Campaign {
-        uint256 id;
+        uint96 id;
         address payable creator;
         address tokenAddress; // address(0) for native token
-        uint256 targetGoal;
-        uint256 totalRaised;
-        uint256 deadline;
+        uint64 deadline;
         bool isCompleted;
         bool isFlexible; // true for flexible payout, false for All-or-Nothing
         bool exists;
+        uint128 targetGoal;
+        uint128 totalRaised;
     }
 
     /// @notice Emitted when a new campaign is created
@@ -49,6 +53,13 @@ interface IFundMePlatform {
         uint256 amount
     );
 
+    /// @notice Emitted when a batch refund transfer fails for a donor (DoS protection)
+    event RefundFailed(
+        uint256 indexed campaignId,
+        address indexed donor,
+        uint256 amount
+    );
+
     /// @notice Emitted when KYC status is set for a creator
     event KycStatusUpdated(address indexed creator, bool status);
 
@@ -57,6 +68,14 @@ interface IFundMePlatform {
 
     /// @notice Emitted when fee recipient is updated
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+
+    /// @notice Emitted when a campaign is canceled/deleted by its creator
+    event CampaignCanceled(uint256 indexed campaignId, address indexed creator);
+
+    /// @notice Emitted when a campaign is frozen or un-frozen by reviewer
+    event CampaignFrozen(uint256 indexed campaignId, bool frozen);
+
+    function cancelCampaign(uint256 campaignId) external;
 
     function createCampaign(
         address tokenAddress,
@@ -97,4 +116,14 @@ interface IFundMePlatform {
     function pause() external;
 
     function unpause() external;
+
+    function batchRefund(uint256 campaignId, address[] calldata donors) external;
+
+    function batchWhitelistTokens(address[] calldata tokens, bool status) external;
+
+    function getCampaign(uint256 campaignId) external view returns (Campaign memory);
+
+    function setCampaignFrozen(uint256 campaignId, bool frozen) external;
+
+    function isCampaignFrozen(uint256 campaignId) external view returns (bool);
 }

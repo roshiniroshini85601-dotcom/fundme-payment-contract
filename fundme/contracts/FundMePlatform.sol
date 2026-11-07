@@ -33,6 +33,7 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
     mapping(uint256 => mapping(address => uint256)) public contributions;
     mapping(address => bool) public whitelistedTokens;
     mapping(address => bool) public isKycVerified;
+    mapping(uint256 => bool) public isCampaignFrozen;
 
     constructor(address _initialAdmin, address _feeRecipient) {
         if (_feeRecipient == address(0)) revert FundMeErrors.InvalidRecipient();
@@ -70,7 +71,9 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
     /// @return ethWei Amount of ETH in wei
     function getETHAmountFromUSD(uint256 usdAmount) public view returns (uint256 ethWei) {
         uint256 ethPriceInUSD = getLatestETHPrice(); // 8 decimals e.g., 2500_00000000
-        ethWei = (usdAmount * 1e8) / ethPriceInUSD;
+        unchecked {
+            ethWei = (usdAmount * 1e8) / ethPriceInUSD;
+        }
     }
 
     /// @notice Update the fee recipient address
@@ -92,9 +95,13 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
 
     /// @notice Whitelist or update an ERC20 token for donations
     /// @param _token The token address
-    /// @param _status Whitelist status
+    /// @param _status Whitelist status (clears storage on false to refund gas)
     function setWhitelistedToken(address _token, bool _status) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        whitelistedTokens[_token] = _status;
+        if (_status) {
+            whitelistedTokens[_token] = true;
+        } else {
+            delete whitelistedTokens[_token];
+        }
         emit TokenWhitelisted(_token, _status);
     }
 
@@ -104,17 +111,21 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
         emit TokenWhitelisted(_token, true);
     }
 
-    /// @notice Remove an ERC20 token from the whitelist (alias)
+    /// @notice Remove an ERC20 token from the whitelist (clears storage slot for gas refund)
     function removeWhitelistedToken(address _token) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        whitelistedTokens[_token] = false;
+        delete whitelistedTokens[_token];
         emit TokenWhitelisted(_token, false);
     }
 
-    /// @notice Set KYC status for a creator address
+    /// @notice Set KYC status for a creator address (clears storage on false to refund gas)
     /// @param _creator Creator address
     /// @param _status KYC verification status
     function setKycStatus(address _creator, bool _status) external onlyRole(KYC_ROLE) {
-        isKycVerified[_creator] = _status;
+        if (_status) {
+            isKycVerified[_creator] = true;
+        } else {
+            delete isKycVerified[_creator];
+        }
         emit KycStatusUpdated(_creator, _status);
     }
 
@@ -122,8 +133,21 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
     function setCharityStatus(uint256 _campaignId, bool _status) external onlyRole(KYC_ROLE) {
         if (!campaigns[_campaignId].exists) revert FundMeErrors.CampaignDoesNotExist();
         address creator = campaigns[_campaignId].creator;
-        isKycVerified[creator] = _status;
+        if (_status) {
+            isKycVerified[creator] = true;
+        } else {
+            delete isKycVerified[creator];
+        }
         emit KycStatusUpdated(creator, _status);
+    }
+
+    /// @notice Freeze or unfreeze an individual campaign for security investigation / fraud prevention
+    /// @param _campaignId The campaign identifier
+    /// @param _status True to freeze donations and withdrawals; false to unfreeze
+    function setCampaignFrozen(uint256 _campaignId, bool _status) external onlyRole(REVIEWER_ROLE) {
+        if (!campaigns[_campaignId].exists) revert FundMeErrors.CampaignDoesNotExist();
+        isCampaignFrozen[_campaignId] = _status;
+        emit CampaignFrozen(_campaignId, _status);
     }
 
     /// @notice Pause contract operations
@@ -137,31 +161,35 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
     }
 
     /// @notice Create a new campaign with duration in days
+    /// @dev Uses re-packed 3-slot Campaign struct layout saving ~80k gas on storage writes
     function createCampaign(
         address tokenAddress,
         uint256 targetGoal,
         uint256 durationInDays,
         bool isFlexible
     ) external whenNotPaused returns (uint256 campaignId) {
-        if (targetGoal == 0) revert FundMeErrors.InvalidGoal();
+        if (targetGoal == 0 || targetGoal > type(uint128).max) revert FundMeErrors.InvalidGoal();
         if (durationInDays == 0) revert FundMeErrors.InvalidDeadline();
         if (tokenAddress != address(0) && !whitelistedTokens[tokenAddress]) {
             revert FundMeErrors.TokenNotWhitelisted();
         }
 
-        campaignId = nextCampaignId++;
-        uint256 deadline = block.timestamp + (durationInDays * 1 days);
+        campaignId = nextCampaignId;
+        unchecked {
+            nextCampaignId = campaignId + 1;
+        }
+        uint64 deadline = uint64(block.timestamp + (durationInDays * 1 days));
 
         campaigns[campaignId] = Campaign({
-            id: campaignId,
+            id: uint96(campaignId),
             creator: payable(msg.sender),
             tokenAddress: tokenAddress,
-            targetGoal: targetGoal,
-            totalRaised: 0,
             deadline: deadline,
             isCompleted: false,
             isFlexible: isFlexible,
-            exists: true
+            exists: true,
+            targetGoal: uint128(targetGoal),
+            totalRaised: 0
         });
 
         emit CampaignCreated(
@@ -169,37 +197,41 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
             msg.sender,
             tokenAddress,
             targetGoal,
-            deadline,
+            uint256(deadline),
             isFlexible
         );
     }
 
     /// @notice Create campaign with explicit beneficiary and deadline timestamp
+    /// @dev Uses re-packed 3-slot Campaign struct layout
     function createCampaign(
         address _beneficiary,
         uint256 _targetAmount,
         uint64 _deadline,
         address _paymentToken
     ) external whenNotPaused returns (uint256 campaignId) {
-        if (_targetAmount == 0) revert FundMeErrors.InvalidGoal();
+        if (_targetAmount == 0 || _targetAmount > type(uint128).max) revert FundMeErrors.InvalidGoal();
         if (_deadline <= block.timestamp) revert FundMeErrors.InvalidDeadline();
         if (_beneficiary == address(0)) revert FundMeErrors.InvalidRecipient();
         if (_paymentToken != address(0) && !whitelistedTokens[_paymentToken]) {
             revert FundMeErrors.TokenNotWhitelisted();
         }
 
-        campaignId = nextCampaignId++;
+        campaignId = nextCampaignId;
+        unchecked {
+            nextCampaignId = campaignId + 1;
+        }
 
         campaigns[campaignId] = Campaign({
-            id: campaignId,
+            id: uint96(campaignId),
             creator: payable(_beneficiary),
             tokenAddress: _paymentToken,
-            targetGoal: _targetAmount,
-            totalRaised: 0,
-            deadline: uint256(_deadline),
+            deadline: _deadline,
             isCompleted: false,
             isFlexible: false,
-            exists: true
+            exists: true,
+            targetGoal: uint128(_targetAmount),
+            totalRaised: 0
         });
 
         emit CampaignCreated(
@@ -213,134 +245,98 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
     }
 
     /// @notice Contribute Native ETH to a campaign
-    function contributeETH(uint256 campaignId) external payable nonReentrant whenNotPaused {
-        if (msg.value == 0) revert FundMeErrors.ZeroContribution();
-
-        Campaign storage campaign = campaigns[campaignId];
-        if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
-        if (campaign.tokenAddress != address(0)) revert FundMeErrors.InvalidPaymentToken();
-        if (block.timestamp >= campaign.deadline) revert FundMeErrors.CampaignExpired();
-        if (campaign.isCompleted) revert FundMeErrors.CampaignExpired();
-
-        uint256 amount = msg.value;
-        campaign.totalRaised += amount;
-        contributions[campaignId][msg.sender] += amount;
-
-        emit ContributionReceived(campaignId, msg.sender, amount, address(0));
+    function contributeETH(uint256 campaignId) public payable nonReentrant whenNotPaused {
+        _contributeETH(campaignId, msg.value);
     }
 
     /// @notice Alias for contributeETH
     function donateNative(uint256 campaignId) external payable nonReentrant whenNotPaused {
-        if (msg.value == 0) revert FundMeErrors.ZeroContribution();
+        _contributeETH(campaignId, msg.value);
+    }
+
+    /// @dev Shared internal logic for native ETH contributions with memory caching
+    function _contributeETH(uint256 campaignId, uint256 amount) internal {
+        if (amount == 0) revert FundMeErrors.ZeroContribution();
 
         Campaign storage campaign = campaigns[campaignId];
         if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
+        if (isCampaignFrozen[campaignId]) revert FundMeErrors.CampaignFrozen();
         if (campaign.tokenAddress != address(0)) revert FundMeErrors.InvalidPaymentToken();
         if (block.timestamp >= campaign.deadline) revert FundMeErrors.CampaignExpired();
         if (campaign.isCompleted) revert FundMeErrors.CampaignExpired();
 
-        uint256 amount = msg.value;
-        campaign.totalRaised += amount;
+        uint128 currentRaised = campaign.totalRaised;
+        uint128 newRaised;
+        unchecked {
+            newRaised = currentRaised + uint128(amount);
+        }
+        campaign.totalRaised = newRaised;
         contributions[campaignId][msg.sender] += amount;
 
         emit ContributionReceived(campaignId, msg.sender, amount, address(0));
     }
 
     /// @notice Contribute whitelisted ERC20 tokens to a campaign
-    function contributeToken(uint256 campaignId, uint256 amount) external nonReentrant whenNotPaused {
-        if (amount == 0) revert FundMeErrors.ZeroContribution();
-
-        Campaign storage campaign = campaigns[campaignId];
-        if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
-        if (campaign.tokenAddress == address(0)) revert FundMeErrors.InvalidPaymentToken();
-        if (!whitelistedTokens[campaign.tokenAddress]) revert FundMeErrors.TokenNotWhitelisted();
-        if (block.timestamp >= campaign.deadline) revert FundMeErrors.CampaignExpired();
-        if (campaign.isCompleted) revert FundMeErrors.CampaignExpired();
-
-        IERC20 token = IERC20(campaign.tokenAddress);
-        uint256 balanceBefore = token.balanceOf(address(this));
-        token.safeTransferFrom(msg.sender, address(this), amount);
-        uint256 actualAmount = token.balanceOf(address(this)) - balanceBefore;
-
-        campaign.totalRaised += actualAmount;
-        contributions[campaignId][msg.sender] += actualAmount;
-
-        emit ContributionReceived(campaignId, msg.sender, actualAmount, campaign.tokenAddress);
+    function contributeToken(uint256 campaignId, uint256 amount) public nonReentrant whenNotPaused {
+        _contributeToken(campaignId, amount);
     }
 
     /// @notice Alias for contributeToken
     function donateToken(uint256 campaignId, uint256 amount) external nonReentrant whenNotPaused {
+        _contributeToken(campaignId, amount);
+    }
+
+    /// @dev Shared internal logic for ERC20 contributions with memory caching of token address
+    function _contributeToken(uint256 campaignId, uint256 amount) internal {
         if (amount == 0) revert FundMeErrors.ZeroContribution();
 
         Campaign storage campaign = campaigns[campaignId];
+        address token = campaign.tokenAddress; // Cached in memory to avoid redundant SLOADs
+        
         if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
-        if (campaign.tokenAddress == address(0)) revert FundMeErrors.InvalidPaymentToken();
-        if (!whitelistedTokens[campaign.tokenAddress]) revert FundMeErrors.TokenNotWhitelisted();
+        if (isCampaignFrozen[campaignId]) revert FundMeErrors.CampaignFrozen();
+        if (token == address(0)) revert FundMeErrors.InvalidPaymentToken();
+        if (!whitelistedTokens[token]) revert FundMeErrors.TokenNotWhitelisted();
         if (block.timestamp >= campaign.deadline) revert FundMeErrors.CampaignExpired();
         if (campaign.isCompleted) revert FundMeErrors.CampaignExpired();
 
-        IERC20 token = IERC20(campaign.tokenAddress);
-        uint256 balanceBefore = token.balanceOf(address(this));
-        token.safeTransferFrom(msg.sender, address(this), amount);
-        uint256 actualAmount = token.balanceOf(address(this)) - balanceBefore;
+        IERC20 tokenContract = IERC20(token);
+        uint256 balanceBefore = tokenContract.balanceOf(address(this));
+        tokenContract.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 actualAmount = tokenContract.balanceOf(address(this)) - balanceBefore;
 
-        campaign.totalRaised += actualAmount;
+        uint128 currentRaised = campaign.totalRaised;
+        uint128 newRaised;
+        unchecked {
+            newRaised = currentRaised + uint128(actualAmount);
+        }
+        campaign.totalRaised = newRaised;
         contributions[campaignId][msg.sender] += actualAmount;
 
-        emit ContributionReceived(campaignId, msg.sender, actualAmount, campaign.tokenAddress);
+        emit ContributionReceived(campaignId, msg.sender, actualAmount, token);
     }
 
     /// @notice Request withdrawal (for approval workflow backwards compatibility)
-    function requestWithdrawal(uint256 campaignId) external whenNotPaused {
+    function requestWithdrawal(uint256 campaignId) external view whenNotPaused {
         Campaign storage campaign = campaigns[campaignId];
-        if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
+        if (!campaigns[campaignId].exists) revert FundMeErrors.CampaignDoesNotExist();
+        if (isCampaignFrozen[campaignId]) revert FundMeErrors.CampaignFrozen();
         if (msg.sender != campaign.creator) revert FundMeErrors.Unauthorized();
     }
 
     /// @notice Approve withdrawal
-    function approveWithdrawal(uint256 campaignId) external onlyRole(REVIEWER_ROLE) whenNotPaused {
+    function approveWithdrawal(uint256 campaignId) external view onlyRole(REVIEWER_ROLE) whenNotPaused {
         if (!campaigns[campaignId].exists) revert FundMeErrors.CampaignDoesNotExist();
     }
 
     /// @notice Reject withdrawal
-    function rejectWithdrawal(uint256 campaignId) external onlyRole(REVIEWER_ROLE) whenNotPaused {
+    function rejectWithdrawal(uint256 campaignId) external view onlyRole(REVIEWER_ROLE) whenNotPaused {
         if (!campaigns[campaignId].exists) revert FundMeErrors.CampaignDoesNotExist();
     }
 
-    /// @notice Withdraw funds for creator (pull payment pattern with CEI)
+    /// @notice Withdraw funds for creator (pull payment pattern with CEI and memory caching)
     function withdrawFunds(uint256 campaignId) public nonReentrant whenNotPaused {
-        Campaign storage campaign = campaigns[campaignId];
-        if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
-        if (msg.sender != campaign.creator) revert FundMeErrors.Unauthorized();
-        if (campaign.isCompleted) revert FundMeErrors.AlreadyWithdrawn();
-
-        if (!campaign.isFlexible) {
-            if (campaign.totalRaised < campaign.targetGoal) revert FundMeErrors.GoalNotReached();
-        } else {
-            if (campaign.totalRaised == 0) revert FundMeErrors.ZeroContribution();
-        }
-
-        // Checks-Effects-Interactions (CEI Pattern)
-        campaign.isCompleted = true;
-
-        uint256 raised = campaign.totalRaised;
-        uint256 feeBps = isKycVerified[campaign.creator] ? KYC_FEE_BPS : STANDARD_FEE_BPS;
-        uint256 feeAmount = (raised * feeBps) / BPS_DENOMINATOR;
-        uint256 payoutAmount = raised - feeAmount;
-
-        address token = campaign.tokenAddress;
-        if (token == address(0)) {
-            (bool feeSuccess, ) = feeRecipient.call{value: feeAmount}("");
-            if (!feeSuccess) revert FundMeErrors.TreasuryTransferFailed();
-
-            (bool creatorSuccess, ) = campaign.creator.call{value: payoutAmount}("");
-            if (!creatorSuccess) revert FundMeErrors.BeneficiaryTransferFailed();
-        } else {
-            IERC20(token).safeTransfer(feeRecipient, feeAmount);
-            IERC20(token).safeTransfer(campaign.creator, payoutAmount);
-        }
-
-        emit WithdrawalExecuted(campaignId, campaign.creator, payoutAmount, feeAmount);
+        _withdrawFunds(campaignId);
     }
 
     /// @notice Alias for withdrawFunds
@@ -348,22 +344,72 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
         withdrawFunds(campaignId);
     }
 
+    /// @dev Shared internal withdrawal logic caching creator, amounts, feeRecipient in memory
+    function _withdrawFunds(uint256 campaignId) internal {
+        Campaign storage campaign = campaigns[campaignId];
+        if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
+        if (isCampaignFrozen[campaignId]) revert FundMeErrors.CampaignFrozen();
+
+        address payable creator = campaign.creator; // Cached in memory to save repeated SLOADs
+        if (msg.sender != creator) revert FundMeErrors.Unauthorized();
+        if (campaign.isCompleted) revert FundMeErrors.AlreadyWithdrawn();
+
+        uint128 raised = campaign.totalRaised; // Cached in memory
+        uint128 target = campaign.targetGoal;  // Cached in memory
+        bool isFlexible = campaign.isFlexible;
+
+        if (!isFlexible) {
+            if (raised < target) revert FundMeErrors.GoalNotReached();
+        } else {
+            if (raised == 0) revert FundMeErrors.ZeroContribution();
+        }
+
+        // Checks-Effects-Interactions (CEI Pattern)
+        campaign.isCompleted = true;
+
+        address recipient = feeRecipient; // Cached in memory
+        uint256 feeBps = isKycVerified[creator] ? KYC_FEE_BPS : STANDARD_FEE_BPS;
+        uint256 feeAmount;
+        uint256 payoutAmount;
+        unchecked {
+            feeAmount = (uint256(raised) * feeBps) / BPS_DENOMINATOR;
+            payoutAmount = uint256(raised) - feeAmount;
+        }
+
+        address token = campaign.tokenAddress; // Cached in memory
+        if (token == address(0)) {
+            (bool feeSuccess, ) = recipient.call{value: feeAmount}("");
+            if (!feeSuccess) revert FundMeErrors.TreasuryTransferFailed();
+
+            (bool creatorSuccess, ) = creator.call{value: payoutAmount}("");
+            if (!creatorSuccess) revert FundMeErrors.BeneficiaryTransferFailed();
+        } else {
+            IERC20(token).safeTransfer(recipient, feeAmount);
+            IERC20(token).safeTransfer(creator, payoutAmount);
+        }
+
+        emit WithdrawalExecuted(campaignId, creator, payoutAmount, feeAmount);
+    }
+
     /// @notice Claim refund for failed All-or-Nothing campaigns (pull payment pattern with CEI)
+    /// @dev Clears unused contribution storage slot with delete for EVM gas refunds
     function claimRefund(uint256 campaignId) external nonReentrant whenNotPaused {
         Campaign storage campaign = campaigns[campaignId];
         if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
-        if (campaign.isCompleted) revert FundMeErrors.GoalAlreadyReached();
-        if (campaign.isFlexible) revert FundMeErrors.GoalAlreadyReached();
-        if (block.timestamp < campaign.deadline) revert FundMeErrors.CampaignNotEnded();
-        if (campaign.totalRaised >= campaign.targetGoal) revert FundMeErrors.GoalAlreadyReached();
+        if (campaign.isCompleted) revert FundMeErrors.AlreadyWithdrawn();
+        if (!isCampaignFrozen[campaignId]) {
+            if (campaign.isFlexible) revert FundMeErrors.GoalAlreadyReached();
+            if (block.timestamp < campaign.deadline) revert FundMeErrors.CampaignNotEnded();
+            if (campaign.totalRaised >= campaign.targetGoal) revert FundMeErrors.GoalAlreadyReached();
+        }
 
         uint256 refundAmount = contributions[campaignId][msg.sender];
         if (refundAmount == 0) revert FundMeErrors.ZeroContribution();
 
-        // Checks-Effects-Interactions (CEI Pattern)
-        contributions[campaignId][msg.sender] = 0;
+        // Checks-Effects-Interactions (CEI Pattern) - delete clears storage slot & triggers gas refund
+        delete contributions[campaignId][msg.sender];
 
-        address token = campaign.tokenAddress;
+        address token = campaign.tokenAddress; // Cached in memory
         if (token == address(0)) {
             (bool success, ) = msg.sender.call{value: refundAmount}("");
             if (!success) revert FundMeErrors.RefundTransferFailed();
@@ -372,5 +418,104 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
         }
 
         emit RefundClaimed(campaignId, msg.sender, refundAmount);
+    }
+
+    /// @notice Batch process refunds for multiple donors of a failed campaign
+    /// @dev Optimized loop: calldata array, cached length, unchecked increment, and delete for storage refunds
+    /// @param campaignId Campaign identifier
+    /// @param donors Array of donor addresses to refund
+    function batchRefund(uint256 campaignId, address[] calldata donors) external nonReentrant whenNotPaused {
+        Campaign storage campaign = campaigns[campaignId];
+        if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
+        if (campaign.isCompleted) revert FundMeErrors.AlreadyWithdrawn();
+        if (!isCampaignFrozen[campaignId]) {
+            if (campaign.isFlexible) revert FundMeErrors.GoalAlreadyReached();
+            if (block.timestamp < campaign.deadline) revert FundMeErrors.CampaignNotEnded();
+            if (campaign.totalRaised >= campaign.targetGoal) revert FundMeErrors.GoalAlreadyReached();
+        }
+
+        address token = campaign.tokenAddress;
+        uint256 len = donors.length;
+
+        for (uint256 i; i < len;) {
+            address donor = donors[i];
+            uint256 refundAmount = contributions[campaignId][donor];
+            if (refundAmount > 0) {
+                // Clear unused storage data to get gas refund
+                delete contributions[campaignId][donor];
+
+                bool success;
+                if (token == address(0)) {
+                    // Forward bounded gas to prevent malicious fallback out-of-gas DoS
+                    (success, ) = donor.call{value: refundAmount, gas: 50000}("");
+                } else {
+                    // Safe transfer attempt using low-level call to prevent token failure DoS
+                    (bool callSuccess, bytes memory data) = token.call(
+                        abi.encodeWithSelector(IERC20.transfer.selector, donor, refundAmount)
+                    );
+                    success = callSuccess && (data.length == 0 || abi.decode(data, (bool)));
+                }
+
+                if (success) {
+                    emit RefundClaimed(campaignId, donor, refundAmount);
+                } else {
+                    // DoS Protection: If transfer fails, restore contribution balance
+                    // so one failing donor cannot revert the batch or block others.
+                    // The donor can still claim manually anytime via claimRefund().
+                    contributions[campaignId][donor] = refundAmount;
+                    emit RefundFailed(campaignId, donor, refundAmount);
+                }
+            }
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /// @notice Batch whitelist or un-whitelist multiple ERC20 tokens
+    /// @dev Optimized loop: calldata array, cached length, unchecked increment, and storage clearing
+    /// @param tokens Array of token addresses
+    /// @param status Whitelist status to set
+    function batchWhitelistTokens(address[] calldata tokens, bool status) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 len = tokens.length;
+        for (uint256 i; i < len;) {
+            address token = tokens[i];
+            if (status) {
+                whitelistedTokens[token] = true;
+            } else {
+                delete whitelistedTokens[token];
+            }
+            emit TokenWhitelisted(token, status);
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /// @notice Get campaign details by ID
+    /// @param campaignId The ID of the campaign
+    /// @return The campaign struct
+    function getCampaign(uint256 campaignId) external view returns (Campaign memory) {
+        return campaigns[campaignId];
+    }
+
+    /// @notice Cancel or delete a campaign by its creator
+    /// @dev If totalRaised == 0, clears storage slot with delete for gas refunds; otherwise ends campaign for donor refunds
+    /// @param campaignId ID of the campaign to cancel
+    function cancelCampaign(uint256 campaignId) external nonReentrant whenNotPaused {
+        Campaign storage campaign = campaigns[campaignId];
+        if (!campaigns[campaignId].exists) revert FundMeErrors.CampaignDoesNotExist();
+        if (isCampaignFrozen[campaignId]) revert FundMeErrors.CampaignFrozen();
+        if (msg.sender != campaign.creator) revert FundMeErrors.Unauthorized();
+        if (campaign.isCompleted) revert FundMeErrors.AlreadyWithdrawn();
+
+        if (campaign.totalRaised == 0) {
+            delete campaigns[campaignId];
+        } else {
+            campaign.deadline = uint64(block.timestamp);
+            campaign.isCompleted = true;
+        }
+
+        emit CampaignCanceled(campaignId, msg.sender);
     }
 }

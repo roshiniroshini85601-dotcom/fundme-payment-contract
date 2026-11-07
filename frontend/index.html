@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FundMe Web3 — Decentralized Crowdfunding Platform</title>
+  <meta name="description"
+    content="Decentralized crowdfunding platform powered by gas-optimized smart contracts with native ETH and ERC-20 multi-token funding.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.2/ethers.umd.min.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div class="container nav">
+      <a href="#" class="logo">
+        <div class="logo-icon">⚡</div>
+        <span>FundMe<span class="gradient-text">Platform</span></span>
+      </a>
+      <div class="nav-actions">
+        <div class="network-badge" id="networkBadge">
+          <span class="status-dot disconnected" id="statusDot"></span>
+          <span id="networkName">Not Connected</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="openTxHistoryBtn" title="View Transaction History" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-weight: 600;">
+          <span>📜 Activity</span>
+          <span class="badge" id="txCountBadge" style="background: rgba(99, 102, 241, 0.25); color: #818cf8; padding: 1px 6px; font-size: 0.72rem; border-radius: 99px;">0</span>
+        </button>
+        <button class="btn btn-secondary btn-sm" id="openAdminKycBtn" title="KYC Verification & Admin Panel" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-weight: 600;">
+          <span>🛡️ KYC Admin</span>
+        </button>
+        <button class="contract-config-btn" id="contractConfigBtn" title="Set Contract Address">
+          Contract
+        </button>
+        <button class="btn btn-primary" id="connectWalletBtn">
+          Connect Wallet
+        </button>
+        <div class="wallet-connected-strip" id="walletConnectedStrip" style="display:none;">
+          <div class="wallet-avatar" id="walletAvatar">🦊</div>
+          <span class="wallet-addr" id="walletAddrLabel">0x000...0000</span>
+          <span class="wallet-type-badge" id="walletTypeBadge">MetaMask</span>
+          <button class="btn btn-secondary btn-sm" id="switchAccountBtn" style="padding: 3px 8px; font-size: 0.75rem;"
+            title="Switch to another account">Switch Account</button>
+          <button class="wallet-disconnect-btn" id="disconnectWalletBtn" title="Disconnect Wallet">&times;</button>
+        </div>
+      </div>
+    </div>
+  </header>
+  <main class="container">
+    <div id="wrongNetworkBanner"
+      style="display:none; margin: 0 auto 20px; max-width: 800px; padding: 12px 20px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 12px; color: #fbbf24; align-items: center; justify-content: space-between; gap: 15px;">
+      <span>⚠️ <strong>Connected to Ethereum Mainnet</strong> — Switch to Hardhat Localhost to test without real
+        money.</span>
+      <button id="switchNetworkBannerBtn" class="btn btn-primary"
+        style="padding: 6px 14px; font-size: 0.85rem; white-space: nowrap; cursor: pointer;">⚡ Switch to Hardhat
+        Local</button>
+    </div>
+    <section class="hero">
+      <h1 class="hero-title">
+        Fund The Future On <span class="gradient-text">Ethereum</span>
+      </h1>
+      <p class="hero-subtitle">
+        Ultra gas-optimized crowdfunding with automated pull refunds, flexible payouts, and live Chainlink ETH price
+        feeds.
+      </p>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Active Campaigns</div>
+          <div class="stat-value" id="statActiveCampaigns">0</div>
+          <span class="stat-badge">Live on chain</span>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Raised</div>
+          <div class="stat-value" id="statTotalRaised">0.00 ETH</div>
+          <span class="stat-badge">All-time</span>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Chainlink ETH / USD</div>
+          <div class="stat-value" id="statEthPrice">$2,500.00</div>
+          <span class="stat-badge">Real-time oracle</span>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Contract Storage</div>
+          <div class="stat-value">3 Slots</div>
+          <span class="stat-badge">57.1% Optimized</span>
+        </div>
+      </div>
+    </section>
+    <div class="toolbar">
+      <div class="filter-chips">
+        <button class="chip active" data-filter="all">All Campaigns</button>
+        <button class="chip" data-filter="active">Active</button>
+        <button class="chip" data-filter="completed">Completed</button>
+        <button class="chip" data-filter="refundable">Refundable</button>
+        <button class="chip" data-filter="my-campaigns">My Campaigns</button>
+        <button class="chip" data-filter="my-donations">Backed by Me</button>
+        <button class="chip" data-filter="kyc-verified">✓ KYC Verified</button>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <button class="btn btn-secondary btn-sm" id="batchRefundOpenBtn">
+          Batch Refund
+        </button>
+        <button class="btn btn-primary" id="openCreateModalBtn">
+          + New Campaign
+        </button>
+      </div>
+    </div>
+    <div class="search-sort-bar">
+      <div class="search-input-wrapper">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="campaignSearchInput" class="search-input" placeholder="Search campaigns by title, ID, or creator address...">
+        <button type="button" id="clearSearchBtn" class="clear-search-btn" style="display: none;">&times;</button>
+      </div>
+      <select id="campaignSortSelect" class="form-select sort-select">
+        <option value="newest">Sort: Newest First</option>
+        <option value="endingSoon">Sort: Ending Soonest</option>
+        <option value="mostRaised">Sort: Highest Raised</option>
+        <option value="closestGoal">Sort: Closest to Goal</option>
+      </select>
+    </div>
+    <div class="campaigns-grid" id="campaignsGrid">
+      <div class="empty-state">
+        <h3>Connect your wallet or configure contract</h3>
+        <p>Click "Contract" to set the deployed contract address or connect your wallet.</p>
+      </div>
+    </div>
+  </main>
+  <div class="modal-overlay" id="createModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Create Crowdfunding Campaign</h2>
+        <button class="modal-close" data-close="createModal">&times;</button>
+      </div>
+      <form id="createCampaignForm">
+        <div class="form-group">
+          <label class="form-label" for="campaignTitleInput">Campaign Title</label>
+          <input class="form-input" type="text" id="campaignTitleInput" placeholder="e.g. Clean Drinking Water for Rural Villages" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="campaignCategorySelect">Campaign Category</label>
+          <select class="form-select" id="campaignCategorySelect">
+            <option value="Charity">🌱 Charity & Humanitarian</option>
+            <option value="Tech">💻 Web3 & Open Source Tech</option>
+            <option value="Community">👥 Community & Education</option>
+            <option value="Medical">🏥 Healthcare & Medical</option>
+            <option value="Creative">🎨 Creative & Indie Arts</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="campaignDescInput">Short Description / Mission</label>
+          <textarea class="form-input" id="campaignDescInput" rows="2" placeholder="Briefly describe what this campaign aims to accomplish..." required></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="tokenTypeSelect">Funding Currency</label>
+          <select class="form-select" id="tokenTypeSelect">
+            <option value="native">Native ETH (0x0)</option>
+            <option value="erc20">Whitelisted ERC-20 Token</option>
+          </select>
+        </div>
+        <div class="form-group" id="erc20AddressGroup" style="display: none;">
+          <label class="form-label" for="tokenAddressInput">Token Contract Address</label>
+          <input class="form-input" type="text" id="tokenAddressInput" placeholder="0x..." />
+          <div class="form-help">Must be whitelisted on the platform.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="targetGoalInput">Target Goal</label>
+          <input class="form-input" type="number" step="0.01" min="0.001" id="targetGoalInput" placeholder="e.g. 5.0"
+            required />
+          <div class="preset-buttons">
+            <button type="button" class="preset-btn" data-goal="1">1 ETH</button>
+            <button type="button" class="preset-btn" data-goal="5">5 ETH</button>
+            <button type="button" class="preset-btn" data-goal="10">10 ETH</button>
+            <button type="button" class="preset-btn" data-goal="50">50 ETH</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="durationInput">Campaign Duration</label>
+          <div style="display: flex; gap: 8px;">
+            <input class="form-input" type="number" min="1" max="1000" id="durationInput" value="5" style="flex: 2;" required />
+            <select class="form-select" id="durationUnitSelect" style="flex: 1.2;">
+              <option value="minutes" selected>Minutes</option>
+              <option value="hours">Hours</option>
+              <option value="days">Days</option>
+            </select>
+          </div>
+          <div class="preset-buttons" style="margin-top: 8px;">
+            <button type="button" class="preset-btn" data-duration="5" data-unit="minutes">5 Mins</button>
+            <button type="button" class="preset-btn" data-duration="15" data-unit="minutes">15 Mins</button>
+            <button type="button" class="preset-btn" data-duration="30" data-unit="minutes">30 Mins</button>
+            <button type="button" class="preset-btn" data-duration="1" data-unit="hours">1 Hour</button>
+            <button type="button" class="preset-btn" data-duration="1" data-unit="days">1 Day</button>
+            <button type="button" class="preset-btn" data-duration="7" data-unit="days">7 Days</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="campaignTypeSelect">Payout Type</label>
+          <select class="form-select" id="campaignTypeSelect">
+            <option value="all-or-nothing">All-or-Nothing (Refundable if target unmet)</option>
+            <option value="flexible">Flexible Payout (Creator keeps any raised funds)</option>
+          </select>
+          <div class="form-help" id="campaignTypeHelp">
+            If the target is unmet by deadline, donors can claim a 100% refund.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close="createModal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="submitCreateBtn">Launch Campaign</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="modal-overlay" id="donateModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Fund Campaign #<span id="donateModalCampaignId">0</span></h2>
+        <button class="modal-close" data-close="donateModal">&times;</button>
+      </div>
+      <div
+        style="background: rgba(255,255,255,0.03); padding: 14px; border-radius: var(--radius-md); margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 6px;">
+          <span style="color: var(--text-muted);">Creator:</span>
+          <span id="donateModalCreator" style="font-family: monospace;">0x0...</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+          <span style="color: var(--text-muted);">Goal / Remaining:</span>
+          <span id="donateModalRemaining" style="font-weight: 600;">0.00 ETH</span>
+        </div>
+      </div>
+      <div
+        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 10px 14px; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px;">
+        <div>
+          <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">
+            Donating From Account</div>
+          <div id="donateDonorAddr"
+            style="font-size: 0.88rem; font-family: monospace; font-weight: 600; color: #818cf8;">0x000...0000</div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" id="donateModalSwitchAccountBtn"
+          style="padding: 4px 10px; font-size: 0.78rem;">Switch Account</button>
+      </div>
+      <form id="donateForm">
+        <div class="form-group">
+          <label class="form-label" for="donateAmountInput">Contribution Amount (<span
+              id="donateTokenSymbol">ETH</span>)</label>
+          <input class="form-input" type="number" step="0.001" min="0.0001" id="donateAmountInput" placeholder="0.1"
+            required />
+          <div class="form-help" id="donateUsdEquivalent">≈ $250.00 USD</div>
+          <div class="preset-buttons">
+            <button type="button" class="preset-btn" data-donate="0.1">+0.1</button>
+            <button type="button" class="preset-btn" data-donate="0.5">+0.5</button>
+            <button type="button" class="preset-btn" data-donate="1.0">+1.0</button>
+            <button type="button" class="preset-btn" data-donate="2.0">+2.0</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close="donateModal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="submitDonateBtn">Confirm Donation</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="modal-overlay" id="configModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Contract Configuration</h2>
+        <button class="modal-close" data-close="configModal">&times;</button>
+      </div>
+      <form id="configForm">
+        <div class="form-group">
+          <label class="form-label" for="contractAddressInput">FundMePlatform Address</label>
+          <input class="form-input" type="text" id="contractAddressInput"
+            placeholder="0xb7f8bc63bbcad18155201308c8f3540b07f84f5e" required />
+          <div class="form-help">Enter the deployed FundMePlatform contract address on your network.</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close="configModal">Close</button>
+          <button type="submit" class="btn btn-primary">Save & Reload</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="modal-overlay" id="batchRefundModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Batch Process Refunds</h2>
+        <button class="modal-close" data-close="batchRefundModal">&times;</button>
+      </div>
+      <form id="batchRefundForm">
+        <div class="form-group">
+          <label class="form-label" for="batchCampaignIdInput">Campaign ID</label>
+          <div style="display: flex; gap: 8px;">
+            <input class="form-input" type="number" id="batchCampaignIdInput" placeholder="Campaign ID (e.g. 11)" style="flex: 1;" required />
+            <button type="button" class="btn btn-secondary btn-sm" id="batchAutoFetchBtn" style="white-space: nowrap; padding: 0 14px; font-weight: 600; border-color: rgba(99, 102, 241, 0.4); color: #818cf8;">
+              ⚡ Auto-Fill Donors
+            </button>
+          </div>
+          <div id="batchDonorsHelper" style="font-size: 0.78rem; color: #94a3b8; margin-top: 5px;"></div>
+        </div>
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label class="form-label" for="batchDonorsInput" style="margin-bottom: 0;">Donor Addresses</label>
+            <span id="batchCountBadge" style="font-size: 0.75rem; color: #38bdf8; font-weight: 600;"></span>
+          </div>
+          <textarea class="form-input" id="batchDonorsInput" rows="4" placeholder="0x123..., 0x456... or click 'Auto-Fill Donors' above"
+            required></textarea>
+          <div class="form-help">Clears storage slots on EVM to earn gas refunds.</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close="batchRefundModal">Cancel</button>
+          <button type="submit" class="btn btn-danger" id="submitBatchRefundBtn">Execute Batch Refund</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="modal-overlay" id="withdrawModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Withdraw Funds — Campaign #<span id="withdrawModalCampaignId">0</span></h2>
+        <button class="modal-close" data-close="withdrawModal">&times;</button>
+      </div>
+      <div
+        style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.95rem;">
+          <span style="color: var(--text-muted);">Total Raised:</span>
+          <span id="withdrawTotalRaised" style="font-weight: 600; color: #fff;">0.00 ETH</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.95rem;">
+          <span style="color: var(--text-muted);">Platform Fee (<span id="withdrawFeePercent">5%</span>):</span>
+          <span id="withdrawFeeAmount" style="font-weight: 600; color: #f87171;">-0.00 ETH</span>
+        </div>
+        <div style="height: 1px; background: var(--border-color); margin: 12px 0;"></div>
+        <div style="display: flex; justify-content: space-between; font-size: 1.1rem; font-weight: 700;">
+          <span style="color: #38ef7d;">Creator Net Payout:</span>
+          <span id="withdrawPayoutAmount" style="color: #38ef7d;">0.00 ETH</span>
+        </div>
+      </div>
+      <div
+        style="display: flex; align-items: center; gap: 10px; padding: 12px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; margin-bottom: 20px;">
+        <div style="font-size: 1.3rem;"></div>
+        <div style="overflow: hidden;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Payout Recipient</div>
+          <div id="withdrawCreatorAddr"
+            style="font-family: monospace; font-size: 0.88rem; font-weight: 600; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+            0x0...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close="withdrawModal">Cancel</button>
+        <button type="button" class="btn btn-success" id="confirmWithdrawBtn"
+          style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">Execute Withdrawal</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-overlay" id="claimRefundModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Claim 100% Refund — Campaign #<span id="refundModalCampaignId">0</span></h2>
+        <button class="modal-close" data-close="claimRefundModal">&times;</button>
+      </div>
+      <div
+        style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: var(--radius-md); padding: 14px; margin-bottom: 20px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+          <span style="font-size: 1.1rem;">⚠️</span>
+          <span style="font-weight: 600; color: #f87171;">Campaign Ended Unmet</span>
+        </div>
+        <div style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.4;">
+          This All-or-Nothing campaign expired before reaching its target goal. Under the smart contract pull-payment
+          rules, donors are entitled to a full 100% refund with storage gas rebates.
+        </div>
+      </div>
+      <div
+        style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.95rem;">
+          <span style="color: var(--text-muted);">Your Total Contribution:</span>
+          <span id="refundUserContribution" style="font-weight: 700; color: #fff; font-size: 1.1rem;">0.00 ETH</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted);">
+          <span>Platform Fee Deductions:</span>
+          <span style="color: #38ef7d;">0.00% (Zero Fee on Refunds)</span>
+        </div>
+        <div style="height: 1px; background: var(--border-color); margin: 12px 0;"></div>
+        <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 700;">
+          <span style="color: #f87171;">Refund To You:</span>
+          <span id="refundUserRefundAmount" style="color: #f87171;">0.00 ETH</span>
+        </div>
+      </div>
+      <div
+        style="display: flex; align-items: center; gap: 10px; padding: 12px; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px; margin-bottom: 20px;">
+        <div style="font-size: 1.3rem;">📥</div>
+        <div style="overflow: hidden;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Refund Recipient</div>
+          <div id="refundDonorAddr"
+            style="font-family: monospace; font-size: 0.88rem; font-weight: 600; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+            0x0...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close="claimRefundModal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmClaimRefundBtn">Claim 100% Refund</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast-container" id="toastContainer"></div>
+  <div class="modal-overlay" id="walletModal">
+    <div class="modal wallet-modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Connect Wallet</h2>
+        <button class="modal-close" data-close="walletModal">&times;</button>
+      </div>
+      <p class="wallet-modal-subtitle">Choose how you'd like to connect to FundMe Platform</p>
+      <div class="wallet-options-grid">
+        <div class="wallet-option" id="walletOptMetaMask">
+          <div class="wallet-icon">🦊</div>
+          <span class="wallet-name">MetaMask</span>
+          <span class="wallet-tag" id="tagMetaMask">Installed</span>
+        </div>
+        <div class="wallet-option" id="walletOptCoinbase">
+          <div class="wallet-icon coinbase-icon-wrapper">
+            <svg width="38" height="38" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="36" height="36" rx="8" fill="#0052FF" />
+              <rect x="8" y="8" width="20" height="20" rx="4" fill="#FFFFFF" />
+              <rect x="13" y="13" width="10" height="10" rx="2.5" fill="#0052FF" />
+            </svg>
+          </div>
+          <span class="wallet-name">Coinbase Wallet</span>
+          <span class="wallet-tag" id="tagCoinbase">Installed</span>
+        </div>
+        <div class="wallet-option" id="walletOptBrave">
+          <div class="wallet-icon">🦁</div>
+          <span class="wallet-name">Brave Wallet</span>
+          <span class="wallet-tag" id="tagBrave">Installed</span>
+        </div>
+        <div class="wallet-option" id="walletOptInjected">
+          <div class="wallet-icon">🔌</div>
+          <span class="wallet-name">Other Wallet</span>
+          <span class="wallet-tag" id="tagInjected">Installed</span>
+        </div>
+      </div>
+      <div class="wallet-divider">or continue without a wallet</div>
+      <button class="wallet-test-option" id="walletOptTest">
+        <div class="wallet-test-icon">🧪</div>
+        <div class="wallet-test-info">
+          <strong>Test / Demo Mode</strong>
+          <span>Uses Hardhat Account #0 — no real wallet needed</span>
+        </div>
+      </button>
+    </div>
+  </div>
+  <div class="modal-overlay" id="coinbaseInstallModal">
+    <div class="modal" style="max-width: 440px;">
+      <div class="modal-header">
+        <h2 class="modal-title" style="display: flex; align-items: center; gap: 10px;">
+          <span style="display: inline-flex; align-items: center;">
+            <svg width="24" height="24" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="36" height="36" rx="8" fill="#0052FF" />
+              <rect x="8" y="8" width="20" height="20" rx="4" fill="#FFFFFF" />
+              <rect x="13" y="13" width="10" height="10" rx="2.5" fill="#0052FF" />
+            </svg>
+          </span>
+          Coinbase Wallet
+        </h2>
+        <button class="modal-close" data-close="coinbaseInstallModal">&times;</button>
+      </div>
+      <div style="padding: 12px 0 20px; line-height: 1.6; color: var(--text-secondary); font-size: 0.95rem;">
+        <p>The <strong>Coinbase Wallet browser extension</strong> was not detected in this browser.</p>
+        <p style="margin-top: 10px; font-size: 0.88rem; color: var(--text-muted);">
+          Install the official extension from the Chrome Web Store to interact directly with the smart contract, or
+          connect using the Coinbase Wallet mobile app.
+        </p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <a href="https://chromewebstore.google.com/detail/coinbase-wallet-extension/hnfanknocfeofbddgcijnmhnfnkdnaad"
+          target="_blank" rel="noopener noreferrer" class="btn btn-primary"
+          style="text-align: center; text-decoration: none;">
+          🌐 Install Coinbase Wallet Extension
+        </a>
+        <button type="button" class="btn btn-secondary" id="coinbaseSdkConnectBtn">
+          📱 Connect via Coinbase QR / Mobile
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transaction History Modal -->
+  <div class="modal-overlay" id="txHistoryModal">
+    <div class="modal tx-history-modal" style="max-width: 860px; width: 95%;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">📜</span>
+          <div>
+            <h2 class="modal-title" style="margin: 0;">Platform Transaction History</h2>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin: 2px 0 0;">Live on-chain log of donations, creator payouts, refunds, and creations</p>
+          </div>
+        </div>
+        <button class="modal-close" data-close="txHistoryModal">&times;</button>
+      </div>
+      <div class="tx-history-toolbar">
+        <div class="tx-tabs">
+          <button type="button" class="tx-tab active" data-tx-tab="all">All Platform Activity</button>
+          <button type="button" class="tx-tab" data-tx-tab="mine">My Wallet Activity</button>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <select class="form-select" id="txTypeFilter" style="padding: 5px 12px; font-size: 0.82rem; width: auto;">
+            <option value="all">All Types</option>
+            <option value="donation">💸 Donations</option>
+            <option value="withdrawal">💰 Withdrawals</option>
+            <option value="refund">↩️ Refunds</option>
+            <option value="created">🚀 Created</option>
+            <option value="kyc">🛡️ KYC Updates</option>
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm" id="refreshTxHistoryBtn" title="Refresh on-chain logs" style="padding: 5px 12px; font-size: 0.82rem;">
+            🔄 Refresh
+          </button>
+        </div>
+      </div>
+      <div class="tx-list-container" id="txListContainer">
+        <div class="empty-state" style="padding: 40px 20px;">
+          <div class="empty-state-icon">⏳</div>
+          <h3>Loading Transactions...</h3>
+          <p>Querying verified contract event logs on-chain.</p>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: space-between; align-items: center;">
+        <span id="txSummaryText" style="font-size: 0.82rem; color: var(--text-muted);">0 transactions</span>
+        <button type="button" class="btn btn-secondary" data-close="txHistoryModal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin KYC Verification Modal -->
+  <div class="modal-overlay" id="adminKycModal">
+    <div class="modal" style="max-width: 560px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.4rem;">🛡️</span>
+          <div>
+            <h2 class="modal-title" style="margin: 0;">Creator Verification (KYC)</h2>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin: 2px 0 0;">Role-based KYC management (1% fee for verified vs 5% standard)</p>
+          </div>
+        </div>
+        <button class="modal-close" data-close="adminKycModal">&times;</button>
+      </div>
+      <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.45;">
+        💡 <strong style="color: #cbd5e1;">Tiered Fee Discount:</strong> The smart contract checks <code>isKycVerified</code> on withdrawal. Verified creators get an 80% discount (<strong>1% fee</strong> vs 5% standard) and a trusted green checkmark badge.
+      </div>
+      <form id="adminKycForm">
+        <div class="form-group">
+          <label class="form-label" for="kycTargetAddress">Creator Wallet Address</label>
+          <div style="display: flex; gap: 8px;">
+            <input class="form-input" type="text" id="kycTargetAddress" placeholder="0x..." style="flex: 1; font-family: monospace;" required />
+            <button type="button" class="btn btn-secondary btn-sm" id="kycCheckStatusBtn" style="white-space: nowrap; padding: 0 14px;">Check Status</button>
+          </div>
+          <div id="kycStatusResult" style="font-size: 0.84rem; margin-top: 6px; font-weight: 600;"></div>
+        </div>
+        <div class="form-group" style="margin-top: 14px;">
+          <label class="form-label" for="kycCreatorQuickSelect">Quick Select Active Campaign Creator</label>
+          <select class="form-select" id="kycCreatorQuickSelect">
+            <option value="">-- Select creator address --</option>
+          </select>
+        </div>
+        <div class="modal-footer" style="margin-top: 24px; display: flex; justify-content: space-between; align-items: center;">
+          <button type="button" class="btn btn-secondary" data-close="adminKycModal">Cancel</button>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-danger btn-sm" id="revokeKycBtn" style="display: none;">Revoke Verification</button>
+            <button type="submit" class="btn btn-success" id="verifyKycSubmitBtn">✓ Verify Creator (1% Fee)</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

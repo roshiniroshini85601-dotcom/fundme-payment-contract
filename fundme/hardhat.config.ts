@@ -23,10 +23,18 @@ export default defineConfig({
     hardhatMainnet: {
       type: "edr-simulated",
       chainType: "l1",
+      // Suppress MetaMask token-detection probe noise
+      loggingEnabled: false,
+    },
+    localhost: {
+      type: "http",
+      chainType: "l1",
+      url: "http://127.0.0.1:8545",
     },
     hardhatOp: {
       type: "edr-simulated",
       chainType: "op",
+      loggingEnabled: false,
     },
     sepolia: {
       type: "http",

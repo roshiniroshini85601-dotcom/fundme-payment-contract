@@ -2,6 +2,10 @@
   "name": "fund-me-contract",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "test": "hardhat test",
+    "serve:frontend": "node scripts/serve-frontend.js"
+  },
   "devDependencies": {
     "@nomicfoundation/hardhat-ignition": "^3.1.8",
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
