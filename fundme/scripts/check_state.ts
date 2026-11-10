@@ -1,7 +1,7 @@
 import { createPublicClient, http, formatEther } from "viem";
 import { hardhat } from "viem/chains";
 
-const ADDR = "0x610178da211fef7d417bc0e6fed39f05609ad788";
+const ADDR = "0x0165878a594ca255338adfa4d48449f69242eb8f";
 
 async function main() {
   const client = createPublicClient({ chain: hardhat, transport: http("http://127.0.0.1:8545") });

@@ -1,15 +1,4 @@
-export const KNOWN_ACCOUNTS = {
-  "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266": "Account #0",
-  "0x70997970c51812dc3a010c7d01b50e0d17dc79c8": "Account #1",
-  "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc": "Account #2",
-  "0x90f79bf6eb2c4f870365e785982e1f101e93b906": "Account #3",
-  "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65": "Account #4",
-  "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc": "Account #5",
-  "0x976ea74026e726554db657fa54763abd0c3a0aa9": "Account #6",
-  "0x14dc79964da2c08b23698b3d3cc7ca32193d9955": "Account #7",
-  "0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f": "Account #8",
-  "0x23b0f134098ebe61d80932275c9603bf0f0b15b0": "MetaMask Account 7",
-};
+export const KNOWN_ACCOUNTS = {};
 
 export function formatAccount(address) {
   if (!address) return "0x0...";
@@ -24,9 +13,19 @@ export function showToast(message, type = "info") {
   if (!toastContainer) return;
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
+  
+  let iconSvg = "";
+  if (type === "success") {
+    iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
+  } else if (type === "error") {
+    iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
+  } else {
+    iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
+  }
+
   toast.innerHTML = `
-    <div style="font-size: 1.2rem;">${type === "success" ? "✅" : type === "error" ? "❌" : "ℹ️"}</div>
-    <div style="flex: 1; font-size: 0.9rem;">${message}</div>
+    <div class="toast-icon-wrap">${iconSvg}</div>
+    <div style="flex: 1; font-size: 0.88rem; line-height: 1.4;">${message}</div>
   `;
   toastContainer.appendChild(toast);
   setTimeout(() => {
@@ -64,7 +63,7 @@ export function closeModal(modal) {
   if (modal) modal.classList.remove("active");
 }
 
-export async function copyToClipboard(text, message = "Copied to clipboard!") {
+export async function copyToClipboard(text, message = "Copied to clipboard") {
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);
@@ -107,6 +106,10 @@ export function initWalletUI(fundMe, onRefreshNeeded) {
   const switchNetworkBannerBtn = document.getElementById("switchNetworkBannerBtn");
   const wrongBanner = document.getElementById("wrongNetworkBanner");
 
+  const networkModal = document.getElementById("networkModal");
+  const selectNetworkSepoliaBtn = document.getElementById("selectNetworkSepoliaBtn");
+  const selectNetworkLocalhostBtn = document.getElementById("selectNetworkLocalhostBtn");
+
   document.querySelectorAll("[data-close]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const modalId = btn.getAttribute("data-close");
@@ -132,28 +135,26 @@ export function initWalletUI(fundMe, onRefreshNeeded) {
         walletTypeBadge.className = "wallet-type-badge badge-coinbase";
         walletTypeBadge.textContent = "Coinbase";
       } else {
-        const walletIcons = { MetaMask: "🦊", Brave: "🦁", Injected: "🔌", simulated: "🧪" };
-        walletAvatar.textContent = walletIcons[res.walletType] || "🔗";
+        walletAvatar.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="16" cy="12" r="2"/><path d="M6 12h.01"/></svg>`;
         walletTypeBadge.className = "wallet-type-badge";
         walletTypeBadge.textContent = res.isSimulated ? "Test Mode" : res.walletType;
       }
     }
 
     if (statusDot) statusDot.classList.remove("disconnected");
-    const chainMap = { 31337: "Localhost (Hardhat)", 11155111: "Sepolia", 1: "Ethereum Mainnet" };
-    const currentNetworkText = res.isSimulated
-      ? "Test Network (Hardhat)"
-      : chainMap[res.chainId] || `Chain ${res.chainId}`;
+    const chainMap = { 11155111: "Sepolia Testnet", 1: "Ethereum Mainnet", 31337: "Localhost" };
+    const currentNetworkText = chainMap[res.chainId] || `Chain ${res.chainId}`;
+    const isSupported = res.chainId === 11155111;
 
     if (networkBadge && networkName) {
-      if (res.chainId !== 31337 && !res.isSimulated) {
+      if (!isSupported) {
         networkBadge.classList.add("wrong-network");
-        networkBadge.title = "Click here to switch to Hardhat Local network!";
-        networkName.textContent = `${currentNetworkText} ⚠️ (Click to switch to Hardhat Local)`;
+        networkBadge.title = "Click to switch network";
+        networkName.textContent = `${currentNetworkText} (Unsupported)`;
         if (wrongBanner) wrongBanner.style.display = "flex";
       } else {
         networkBadge.classList.remove("wrong-network");
-        networkBadge.title = "Connected to Hardhat Local";
+        networkBadge.title = `Connected to ${currentNetworkText} (Click to change)`;
         networkName.textContent = currentNetworkText;
         if (wrongBanner) wrongBanner.style.display = "none";
       }
@@ -169,18 +170,41 @@ export function initWalletUI(fundMe, onRefreshNeeded) {
     if (wrongBanner) wrongBanner.style.display = "none";
   }
 
-  async function triggerSwitchToLocalhost() {
+  async function triggerSwitchNetwork(chainIdHex, networkLabel) {
     try {
-      showToast("Requesting wallet to switch to Hardhat Localhost...", "info");
-      await fundMe.switchNetwork("0x7a69");
-      showToast("Successfully switched to Hardhat Localhost!", "success");
+      showToast(`Requesting wallet switch to ${networkLabel}...`, "info");
+      await fundMe.switchNetwork(chainIdHex);
+      showToast(`Switched to ${networkLabel}!`, "success");
+      if (networkModal) closeModal(networkModal);
     } catch (err) {
       showToast(err.message || "Failed to switch network", "error");
     }
   }
 
-  if (networkBadge) networkBadge.addEventListener("click", triggerSwitchToLocalhost);
-  if (switchNetworkBannerBtn) switchNetworkBannerBtn.addEventListener("click", triggerSwitchToLocalhost);
+  if (networkBadge) {
+    networkBadge.addEventListener("click", () => {
+      if (networkModal) openModal(networkModal);
+      else triggerSwitchNetwork("0x7a69", "Hardhat Localhost");
+    });
+  }
+
+  if (selectNetworkSepoliaBtn) {
+    selectNetworkSepoliaBtn.addEventListener("click", () => {
+      triggerSwitchNetwork("0xaa36a7", "Sepolia Testnet");
+    });
+  }
+
+  if (selectNetworkLocalhostBtn) {
+    selectNetworkLocalhostBtn.addEventListener("click", () => {
+      triggerSwitchNetwork("0x7a69", "Hardhat Localhost");
+    });
+  }
+
+  if (switchNetworkBannerBtn) {
+    switchNetworkBannerBtn.addEventListener("click", () => {
+      triggerSwitchNetwork("0xaa36a7", "Sepolia Testnet");
+    });
+  }
 
   fundMe.onAccountChange = (newAddress) => {
     if (!newAddress) {
@@ -340,18 +364,11 @@ export function initWalletUI(fundMe, onRefreshNeeded) {
     });
   }
 
-  const optTest = document.getElementById("walletOptTest");
-  if (optTest) {
-    optTest.addEventListener("click", () => {
-      handleWalletConnect(() => fundMe.connectSimulated(), optTest);
-    });
-  }
-
   if (walletConnectedStrip) {
     walletConnectedStrip.addEventListener("click", (e) => {
       if (e.target.id === "disconnectWalletBtn" || e.target.id === "switchAccountBtn") return;
       if (fundMe.userAddress) {
-        copyToClipboard(fundMe.userAddress, `Copied ${formatAccount(fundMe.userAddress)} to clipboard!`);
+        copyToClipboard(fundMe.userAddress, `Copied ${formatAccount(fundMe.userAddress)}`);
       }
     });
   }
@@ -419,7 +436,7 @@ export function initWalletUI(fundMe, onRefreshNeeded) {
         "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9", // MockV3Aggregator
       ];
       if (knownWrong.includes(addr.toLowerCase())) {
-        showToast("⚠️ Invalid address: FundMePlatform contract required, not MockERC20 or PriceFeed.", "error");
+        showToast("Invalid address: FundMePlatform contract required, not MockERC20 or PriceFeed.", "error");
         return;
       }
       fundMe.setContractAddress(addr);
@@ -469,6 +486,6 @@ export function initWalletUI(fundMe, onRefreshNeeded) {
     applyWalletConnectedUI,
     applyWalletDisconnectedUI,
     triggerSwitchAccount,
-    triggerSwitchToLocalhost,
+    triggerSwitchNetwork,
   };
 }

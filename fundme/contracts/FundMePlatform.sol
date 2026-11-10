@@ -24,6 +24,9 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
     uint16 public constant KYC_FEE_BPS = 100;      // 1%
     uint16 public constant VERIFIED_CHARITY_FEE_BPS = 100; // 1%
 
+    uint256 public constant MIN_CONTRIBUTION = 0.0001 ether; // 0.0001 ETH minimum to prevent dust attacks
+    uint256 public constant MAX_CONTRIBUTION = 1000 ether;   // 1,000 ETH maximum single donation
+
     uint256 public nextCampaignId;
     address public feeRecipient;
     address public priceFeedAddress;
@@ -257,6 +260,8 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
     /// @dev Shared internal logic for native ETH contributions with memory caching
     function _contributeETH(uint256 campaignId, uint256 amount) internal {
         if (amount == 0) revert FundMeErrors.ZeroContribution();
+        if (amount < MIN_CONTRIBUTION) revert FundMeErrors.ContributionTooLow();
+        if (amount > MAX_CONTRIBUTION) revert FundMeErrors.ContributionTooHigh();
 
         Campaign storage campaign = campaigns[campaignId];
         if (!campaign.exists) revert FundMeErrors.CampaignDoesNotExist();
@@ -289,6 +294,8 @@ contract FundMePlatform is IFundMePlatform, AccessControl, Pausable, ReentrancyG
     /// @dev Shared internal logic for ERC20 contributions with memory caching of token address
     function _contributeToken(uint256 campaignId, uint256 amount) internal {
         if (amount == 0) revert FundMeErrors.ZeroContribution();
+        if (amount < MIN_CONTRIBUTION) revert FundMeErrors.ContributionTooLow();
+        if (amount > MAX_CONTRIBUTION) revert FundMeErrors.ContributionTooHigh();
 
         Campaign storage campaign = campaigns[campaignId];
         address token = campaign.tokenAddress; // Cached in memory to avoid redundant SLOADs

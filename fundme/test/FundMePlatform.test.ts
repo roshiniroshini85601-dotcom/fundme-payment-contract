@@ -165,6 +165,57 @@ describe("FundMePlatform Smart Contract & Security Suite", function () {
             const contractBalance = await mockToken.read.balanceOf([platform.address]);
             assert.equal(contractBalance, contributeAmount);
         });
+
+        it("should revert if ETH contribution is below MIN_CONTRIBUTION or above MAX_CONTRIBUTION", async () => {
+            const { networkHelpers } = await network.create();
+            const { platform, creator, donor1, viem } = await networkHelpers.loadFixture(deployFixture);
+
+            await platform.write.createCampaign(
+                ["0x0000000000000000000000000000000000000000", parseEther("5000"), 14n, false],
+                { account: creator.account }
+            );
+
+            // Too low (< 0.0001 ETH, e.g. 1 wei)
+            await viem.assertions.revertWithCustomError(
+                platform.write.contributeETH([0n], { account: donor1.account, value: 1n }),
+                platform,
+                "ContributionTooLow"
+            );
+
+            // Too high (> 1000 ETH)
+            await viem.assertions.revertWithCustomError(
+                platform.write.contributeETH([0n], { account: donor1.account, value: parseEther("1001") }),
+                platform,
+                "ContributionTooHigh"
+            );
+        });
+
+        it("should revert if ERC20 contribution is below MIN_CONTRIBUTION or above MAX_CONTRIBUTION", async () => {
+            const { networkHelpers } = await network.create();
+            const { platform, mockToken, creator, donor1, viem } = await networkHelpers.loadFixture(deployFixture);
+
+            await platform.write.createCampaign(
+                [mockToken.address, parseEther("5000"), 14n, false],
+                { account: creator.account }
+            );
+
+            await mockToken.write.mint([donor1.account.address, parseEther("2000")]);
+            await mockToken.write.approve([platform.address, parseEther("2000")], { account: donor1.account });
+
+            // Too low (< 0.0001 tokens)
+            await viem.assertions.revertWithCustomError(
+                platform.write.contributeToken([0n, 100n], { account: donor1.account }),
+                platform,
+                "ContributionTooLow"
+            );
+
+            // Too high (> 1000 tokens)
+            await viem.assertions.revertWithCustomError(
+                platform.write.contributeToken([0n, parseEther("1001")], { account: donor1.account }),
+                platform,
+                "ContributionTooHigh"
+            );
+        });
     });
 
     describe("3. Tiered Fee Deduction Verification", function () {

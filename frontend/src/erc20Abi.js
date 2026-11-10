@@ -46,5 +46,15 @@ export const ERC20_ABI = [
     ],
     "outputs": [{ "name": "", "type": "bool" }],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "mint",
+    "inputs": [
+      { "name": "to", "type": "address" },
+      { "name": "amount", "type": "uint256" }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   }
 ];

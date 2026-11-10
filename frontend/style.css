@@ -1189,3 +1189,169 @@ select.form-select option {
   margin-top: 2px;
 }
 
+
+/* ============================================================
+   NETWORK SWITCHER MODAL & SEPOLIA UI
+   ============================================================ */
+.network-alert-banner {
+  display: none;
+  margin: 0 auto 20px;
+  max-width: 900px;
+  padding: 12px 20px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 12px;
+  color: #fbbf24;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+.network-alert-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+.network-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.network-option-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  gap: 12px;
+}
+.network-option-info { flex: 1; }
+.network-option-title {
+  font-weight: 600;
+  color: var(--text-main);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.network-option-sub {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.network-indicator-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.sepolia-dot { background: #818cf8; box-shadow: 0 0 6px #818cf8; }
+.localhost-dot { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+.network-help-box {
+  background: rgba(99,102,241,0.07);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.network-help-box strong { color: #c7d2fe; display: block; margin-bottom: 4px; }
+
+/* Info boxes replacing emojis */
+.info-box-subtle {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  margin-bottom: 6px;
+}
+.info-row:last-child { margin-bottom: 0; }
+.info-label { color: var(--text-muted); }
+.info-value-bold { font-weight: 600; color: #fff; }
+.info-value-mono { font-family: 'JetBrains Mono', monospace; color: var(--text-main); }
+.divider { height: 1px; background: var(--border-color); margin: 10px 0; }
+.account-pill-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(99,102,241,0.07);
+  border: 1px solid rgba(99,102,241,0.22);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.account-pill-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.account-pill-addr { font-size: 0.88rem; font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #818cf8; }
+.alert-box-danger {
+  background: rgba(239,68,68,0.07);
+  border: 1px solid rgba(239,68,68,0.22);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+/* Cleaner hero */
+.hero-badge {
+  display: inline-block;
+  background: rgba(99,102,241,0.14);
+  border: 1px solid rgba(99,102,241,0.3);
+  color: #818cf8;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  margin-bottom: 20px;
+}
+.stat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.toolbar-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.badge-counter {
+  background: rgba(99,102,241,0.25);
+  color: #818cf8;
+  padding: 1px 6px;
+  font-size: 0.72rem;
+  border-radius: 99px;
+}
+
+/* SVG wallet icons */
+.wallet-icon-svg {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Toast icon */
+.toast-icon-wrap {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}

@@ -23,4 +23,6 @@ library FundMeErrors {
     error RefundTransferFailed();
     error InvalidPrice();
     error CampaignFrozen();
+    error ContributionTooLow();
+    error ContributionTooHigh();
 }

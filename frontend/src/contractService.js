@@ -6,16 +6,16 @@ export class FundMeService {
     this.signer = null;
     this.rawProvider = null;
     this.contract = null;
-    const DEPLOYED_ADDRESS = "0x610178da211fef7d417bc0e6fed39f05609ad788";
+    const SEPOLIA_ADDRESS = "0x2c32e5949a12f394261fa8568e0092dd8c468492";
     let stored = null;
     if (typeof localStorage !== "undefined") {
       stored = localStorage.getItem("fundme_contract_address");
-      if (!stored || stored === "0x610178da211fef7d417bc0e6fed39f05609ad788" || stored === "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512") {
-        localStorage.setItem("fundme_contract_address", DEPLOYED_ADDRESS);
-        stored = DEPLOYED_ADDRESS;
+      if (!stored || stored === "0x0165878a594ca255338adfa4d48449f69242eb8f") {
+        localStorage.setItem("fundme_contract_address", SEPOLIA_ADDRESS);
+        stored = SEPOLIA_ADDRESS;
       }
     }
-    this.contractAddress = stored || DEPLOYED_ADDRESS;
+    this.contractAddress = stored || SEPOLIA_ADDRESS;
     this.userAddress = null;
     this.chainId = null;
     this.walletType = null;
@@ -35,9 +35,35 @@ export class FundMeService {
     });
     window.dispatchEvent(new Event("eip6963:requestProvider"));
   }
+  loadContractForChain(chainId) {
+    this.chainId = chainId;
+    const SEPOLIA_DEFAULT = "0x2c32e5949a12f394261fa8568e0092dd8c468492";
+    let addr = "";
+    if (typeof localStorage !== "undefined") {
+      addr = localStorage.getItem(`fundme_contract_address_${chainId}`);
+      if (!addr || addr === "0x0165878a594ca255338adfa4d48449f69242eb8f") {
+        addr = localStorage.getItem("fundme_contract_address");
+      }
+    }
+    if (!addr || addr === "0x0165878a594ca255338adfa4d48449f69242eb8f") {
+      addr = SEPOLIA_DEFAULT;
+    }
+    this.contractAddress = addr || SEPOLIA_DEFAULT;
+    if (this.signer && this.contractAddress) {
+      this.contract = new window.ethers.Contract(this.contractAddress, FUNDME_ABI, this.signer);
+    } else {
+      this.contract = null;
+    }
+    return this.contractAddress;
+  }
   setContractAddress(address) {
     this.contractAddress = address.trim();
-    localStorage.setItem("fundme_contract_address", this.contractAddress);
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("fundme_contract_address", this.contractAddress);
+      if (this.chainId) {
+        localStorage.setItem(`fundme_contract_address_${this.chainId}`, this.contractAddress);
+      }
+    }
     if (this.signer && this.contractAddress) {
       this.contract = new window.ethers.Contract(this.contractAddress, FUNDME_ABI, this.signer);
     } else {
@@ -133,6 +159,7 @@ export class FundMeService {
     this.userAddress = accounts[0];
     const network = await this.provider.getNetwork();
     this.chainId = Number(network.chainId);
+    this.loadContractForChain(this.chainId);
     if (this.contractAddress) {
       this.contract = new window.ethers.Contract(this.contractAddress, FUNDME_ABI, this.signer);
     }
@@ -642,15 +669,37 @@ export class FundMeService {
   }
 
   async contributeETH(campaignId, amountETH) {
+    const num = parseFloat(amountETH);
+    if (isNaN(num) || num < 0.0001) {
+      throw new Error("Minimum contribution is 0.0001 ETH.");
+    }
+    if (num > 1000) {
+      throw new Error("Maximum contribution is 1,000 ETH.");
+    }
     const value = window.ethers.parseEther(amountETH.toString());
     return this._execTx(() => this._requireContract(true).contributeETH(campaignId, { value, gasLimit: 200000n }));
   }
 
   async contributeToken(campaignId, tokenAddress, amountTokens, onStatusUpdate) {
+    const num = parseFloat(amountTokens);
+    if (isNaN(num) || num < 0.0001) {
+      throw new Error("Minimum contribution is 0.0001 tokens.");
+    }
+    if (num > 1000) {
+      throw new Error("Maximum contribution is 1,000 tokens.");
+    }
     return this._execTx(async () => {
       const tokenContract = new window.ethers.Contract(tokenAddress, ERC20_ABI, this.signer);
       const decimals = await tokenContract.decimals();
       const amountWei = window.ethers.parseUnits(amountTokens.toString(), decimals);
+      
+      const userBal = await tokenContract.balanceOf(this.userAddress).catch(() => 0n);
+      if (userBal < amountWei) {
+        const symbol = await tokenContract.symbol().catch(() => "Tokens");
+        const formattedBal = window.ethers.formatUnits(userBal, decimals);
+        throw new Error(`Insufficient ${symbol} balance! Your balance is ${formattedBal} ${symbol}. Please mint test tokens first.`);
+      }
+
       const allowance = await tokenContract.allowance(this.userAddress, this.contractAddress);
       if (allowance < amountWei) {
         if (onStatusUpdate) onStatusUpdate("Requesting token approval...");
@@ -697,5 +746,91 @@ export class FundMeService {
       const price = await this.getLatestETHPrice();
       return (Number(usdAmount) / price).toFixed(6);
     }
+  }
+
+  async switchAccount() {
+    if (!this.rawProvider) throw new Error("No wallet connected.");
+    const accounts = await this.rawProvider.request({ method: "eth_requestAccounts" });
+    if (!accounts || accounts.length === 0) throw new Error("No account selected.");
+    this.signer = await this.provider.getSigner();
+    this.userAddress = accounts[0];
+    if (this.contractAddress) {
+      this.contract = new window.ethers.Contract(this.contractAddress, FUNDME_ABI, this.signer);
+    }
+    return this.userAddress;
+  }
+
+  getDefaultTokenAddress() {
+    if (typeof localStorage !== "undefined") {
+      const stored = localStorage.getItem("fundme_token_address");
+      if (stored && stored !== "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853") return stored;
+    }
+    return "0x0c12b1ee0a59b79755c6a20bdc115c4d837af7a0";
+  }
+
+  setDefaultTokenAddress(address) {
+    if (typeof localStorage !== "undefined" && address) {
+      localStorage.setItem("fundme_token_address", address.trim());
+    }
+  }
+
+  async getTokenDetails(tokenAddress, userAddress) {
+    if (!tokenAddress || tokenAddress === "0x0000000000000000000000000000000000000000") return null;
+    try {
+      const readProvider = this.signer || this.provider || this._getReadProvider();
+      if (!readProvider) return null;
+      const tokenContract = new window.ethers.Contract(tokenAddress, ERC20_ABI, readProvider);
+      const [name, symbol, decimals] = await Promise.all([
+        tokenContract.name().catch(() => "Test Token"),
+        tokenContract.symbol().catch(() => "TOKEN"),
+        tokenContract.decimals().catch(() => 18)
+      ]);
+      let balance = "0";
+      const targetUser = userAddress || this.userAddress;
+      if (targetUser) {
+        const rawBal = await tokenContract.balanceOf(targetUser).catch(() => 0n);
+        balance = window.ethers.formatUnits(rawBal, decimals);
+      }
+      return { name, symbol, decimals, balance, address: tokenAddress };
+    } catch (err) {
+      console.warn("Failed to fetch token details:", err);
+      return null;
+    }
+  }
+
+  async mintTokens(tokenAddress, amountTokens, toAddress = null) {
+    const targetRecipient = toAddress || this.userAddress;
+    if (!targetRecipient) throw new Error("Wallet not connected. Please connect your wallet first.");
+    if (!tokenAddress || !window.ethers.isAddress(tokenAddress)) {
+      throw new Error("Invalid token contract address.");
+    }
+    const num = parseFloat(amountTokens);
+    if (isNaN(num) || num <= 0) {
+      throw new Error("Please enter a valid amount of tokens to mint.");
+    }
+
+    return this._execTx(async () => {
+      const tokenContract = new window.ethers.Contract(tokenAddress, ERC20_ABI, this.signer);
+      const decimals = await tokenContract.decimals().catch(() => 18);
+      const amountWei = window.ethers.parseUnits(amountTokens.toString(), decimals);
+      return tokenContract.mint(targetRecipient, amountWei);
+    });
+  }
+
+  async addTokenToWallet(tokenAddress) {
+    const raw = this.rawProvider || window.ethereum;
+    if (!raw) throw new Error("No Web3 wallet found.");
+    const details = await this.getTokenDetails(tokenAddress);
+    return raw.request({
+      method: "wallet_watchAsset",
+      params: {
+        type: "ERC20",
+        options: {
+          address: tokenAddress,
+          symbol: details?.symbol || "tUSDC",
+          decimals: details?.decimals || 18,
+        },
+      },
+    });
   }
 }

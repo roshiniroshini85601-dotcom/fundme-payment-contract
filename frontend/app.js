@@ -132,7 +132,24 @@ $("openCreateModalBtn")?.addEventListener("click", () => {
 });
 
 tokenTypeSelect?.addEventListener("change", (e) => {
-  if (erc20AddressGroup) erc20AddressGroup.style.display = e.target.value === "erc20" ? "block" : "none";
+  const isErc = e.target.value === "erc20";
+  if (erc20AddressGroup) erc20AddressGroup.style.display = isErc ? "block" : "none";
+  const inp = $("tokenAddressInput") || $("erc20AddressInput");
+  if (isErc && inp && !inp.value.trim()) {
+    inp.value = fundMe.getDefaultTokenAddress();
+  }
+});
+
+$("useDefaultTokenBtn")?.addEventListener("click", () => {
+  const inp = $("tokenAddressInput") || $("erc20AddressInput");
+  if (inp) {
+    inp.value = fundMe.getDefaultTokenAddress();
+    showToast("Filled default test token address!", "success");
+  }
+});
+
+$("quickOpenMintFromCreate")?.addEventListener("click", () => {
+  openMintTokenModal();
 });
 
 createCampaignForm?.addEventListener("submit", async (e) => {
@@ -147,7 +164,8 @@ createCampaignForm?.addEventListener("submit", async (e) => {
     const desc = $("campaignDescInput")?.value.trim() || "Decentralized Crowdfunding Campaign";
 
     const isToken = tokenTypeSelect?.value === "erc20";
-    const tokenAddr = isToken ? $("erc20AddressInput").value.trim() : "0x0000000000000000000000000000000000000000";
+    const rawToken = ($("tokenAddressInput")?.value || $("erc20AddressInput")?.value || "").trim();
+    const tokenAddr = isToken ? (rawToken || fundMe.getDefaultTokenAddress()) : "0x0000000000000000000000000000000000000000";
     const goal = $("targetGoalInput").value;
     const durationVal = parseInt($("durationInput").value, 10);
     const durationUnit = $("durationUnitSelect")?.value || "days";
@@ -182,7 +200,7 @@ createCampaignForm?.addEventListener("submit", async (e) => {
       renderCampaigns();
     }
 
-    showToast("🚀 Campaign successfully created!", "success");
+    showToast(" Campaign successfully created!", "success");
     closeModal(createModal);
     createCampaignForm.reset();
     await updateTxHistoryCount();
@@ -209,8 +227,17 @@ function openDonateModal(c) {
   }
   if ($("donateTokenSymbol")) $("donateTokenSymbol").textContent = c.isNative ? "ETH" : "Tokens";
   if ($("donateDonorAddr")) $("donateDonorAddr").textContent = formatAccount(fundMe.userAddress);
-  if (donateAmountInput) donateAmountInput.value = "0.1";
+  if (donateAmountInput) donateAmountInput.value = "";
   updateDonateUsdEquivalent();
+
+  if (!c.isNative && fundMe.userAddress) {
+    fundMe.getTokenDetails(c.tokenAddress, fundMe.userAddress).then(details => {
+      if (details && $("donateUsdEquivalent")) {
+        $("donateUsdEquivalent").innerHTML = `<span>Your Balance: <strong style="color: #34d399;">${parseFloat(details.balance).toFixed(2)} ${details.symbol}</strong></span>`;
+      }
+    });
+  }
+
   openModal(donateModal);
 }
 
@@ -219,6 +246,13 @@ donateForm?.addEventListener("submit", async (e) => {
   if (!activeDonateCampaign) return;
   const submitBtn = $("submitDonateBtn");
   const amt = donateAmountInput.value;
+  const num = parseFloat(amt);
+  if (isNaN(num) || num < 0.0001) {
+    return showToast("Minimum contribution is 0.0001 " + (activeDonateCampaign.isNative ? "ETH" : "Tokens"), "error");
+  }
+  if (num > 1000) {
+    return showToast("Maximum contribution is 1,000 " + (activeDonateCampaign.isNative ? "ETH" : "Tokens"), "error");
+  }
   const cid = activeDonateCampaign.id;
 
   try {
@@ -244,7 +278,7 @@ donateForm?.addEventListener("submit", async (e) => {
       renderCampaigns();
     }
 
-    showToast(`🎉 Successfully contributed ${amt} ETH to Campaign #${cid}!`, "success");
+    showToast(` Successfully contributed ${amt} ${activeDonateCampaign.isNative ? "ETH" : "Tokens"} to Campaign #${cid}!`, "success");
     closeModal(donateModal);
     await updateTxHistoryCount();
     if (!fundMe.isSimulated) await refreshData();
@@ -353,7 +387,7 @@ $("confirmClaimRefundBtn")?.addEventListener("click", async () => {
       );
       renderCampaigns();
     }
-    showToast("✅ 100% refund returned to your wallet!", "success");
+    showToast(" 100% refund returned to your wallet!", "success");
     closeModal(claimRefundModal);
     if (!fundMe.isSimulated) await refreshData();
   } catch (err) {
@@ -387,14 +421,14 @@ async function populateBatchRefundDonors(cid) {
     if (batchCountBadge) batchCountBadge.textContent = `${donors.length} donor${donors.length > 1 ? "s" : ""} found`;
     const summary = donors.map((d) => `${formatAccount(d.donor)} (${parseFloat(d.amount).toFixed(3)} ETH)`).join(", ");
     if (batchDonorsHelper) {
-      batchDonorsHelper.innerHTML = `<span style="color: #34d399; font-weight: 600;">✅ Found ${donors.length} contributor(s):</span> ${summary}`;
+      batchDonorsHelper.innerHTML = `<span style="color: #34d399; font-weight: 600;"> Found ${donors.length} contributor(s):</span> ${summary}`;
     }
     showToast(`Auto-filled ${donors.length} donor address(es) for Campaign #${cid}!`, "success");
   } else {
     batchDonorsInput.value = "";
     if (batchCountBadge) batchCountBadge.textContent = "0 donors";
     if (batchDonorsHelper) {
-      batchDonorsHelper.innerHTML = `<span style="color: #f87171;">⚠️ No contributions recorded for Campaign #${cid}</span>`;
+      batchDonorsHelper.innerHTML = `<span style="color: #f87171;">Warning: No contributions recorded for Campaign #${cid}</span>`;
     }
   }
 }
@@ -441,7 +475,7 @@ $("batchRefundForm")?.addEventListener("submit", async (e) => {
 
     showToast(`Processing batch refund for ${donors.length} donors...`, "info");
     await fundMe.batchRefund(cid, donors);
-    showToast(`✅ Successfully processed batch refund for ${donors.length} donors!`, "success");
+    showToast(` Successfully processed batch refund for ${donors.length} donors!`, "success");
     closeModal(batchRefundModal);
     $("batchRefundForm").reset();
     if (batchDonorsHelper) batchDonorsHelper.textContent = "";
@@ -521,7 +555,7 @@ campaignsGrid?.addEventListener("click", async (e) => {
     } catch (err) {
       showToast(formatTxError(err), "error");
       btn.disabled = false;
-      btn.textContent = isCurrentlyFrozen ? "☀️ Unfreeze" : "❄️ Freeze";
+      btn.textContent = isCurrentlyFrozen ? " Unfreeze" : " Freeze";
     }
     return;
   }
@@ -593,7 +627,7 @@ function renderCampaigns() {
   if (filtered.length === 0) {
     campaignsGrid.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">🔍</div>
+        <div class="empty-state-icon"></div>
         <h3>No Campaigns Found</h3>
         <p>No campaigns match your selected filter or search term. Create one to get started!</p>
       </div>
@@ -634,7 +668,7 @@ function renderCampaigns() {
           <div class="badges-row">
             <span class="badge badge-category">${meta.category || "General"}</span>
             ${c.isKycVerified
-              ? '<span class="badge badge-kyc-verified" title="Identity verified by platform admin - 1% fee rate">✓ KYC Verified</span>'
+              ? '<span class="badge badge-kyc-verified" title="Identity verified by platform admin - 1% fee rate">V KYC Verified</span>'
               : '<span class="badge badge-standard-creator" title="Standard unverified creator - 5% fee rate">Standard (5% Fee)</span>'
             }
             <span class="badge ${c.isFlexible ? "badge-flexible" : "badge-all-or-nothing"}">
@@ -643,7 +677,7 @@ function renderCampaigns() {
             <span class="badge ${c.isCompleted ? "badge-status-completed" : isGoalMet ? "badge-status-reached" : isPastDeadline ? "badge-status-expired" : "badge-status-active"}">
               ${c.isCompleted ? "Completed" : isGoalMet ? "Goal Reached" : isPastDeadline ? "Ended" : "Active"}
             </span>
-            ${c.isFrozen ? '<span class="badge" style="background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5); font-weight: 600;">❄️ FROZEN</span>' : ''}
+            ${c.isFrozen ? '<span class="badge" style="background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5); font-weight: 600;"> FROZEN</span>' : ''}
             <span class="badge">${c.isNative ? "ETH" : "ERC20"}</span>
           </div>
         </div>
@@ -678,7 +712,7 @@ function renderCampaigns() {
             <div style="display: flex; align-items: center; gap: 8px;">
               <span class="donors-title">Contributors (${c.donors ? c.donors.length : 0})</span>
               ${c.donors?.length
-                ? `<button type="button" class="btn-copy-all-donors" data-cid="${c.id}" title="Copy all donor addresses" style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16); color: #cbd5e1; border-radius: 4px; padding: 2px 7px; font-size: 0.72rem; cursor: pointer;">📋 Copy All</button>`
+                ? `<button type="button" class="btn-copy-all-donors" data-cid="${c.id}" title="Copy all donor addresses" style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16); color: #cbd5e1; border-radius: 4px; padding: 2px 7px; font-size: 0.72rem; cursor: pointer;"> Copy All</button>`
                 : ""
               }
             </div>
@@ -696,7 +730,7 @@ function renderCampaigns() {
                           ${formatAccount(d.donor)}
                           ${fundMe.userAddress?.toLowerCase() === d.donor.toLowerCase() ? '<span class="you-badge">You</span>' : ""}
                         </span>
-                        <button type="button" class="btn-copy-donor" data-address="${d.donor}" title="Copy address" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 2px 4px; font-size: 0.8rem; line-height: 1;">📋</button>
+                        <button type="button" class="btn-copy-donor" data-address="${d.donor}" title="Copy address" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 2px 4px; font-size: 0.8rem; line-height: 1;"></button>
                       </div>
                       <span class="donor-amount">${parseFloat(d.amount).toFixed(3)} ${c.isNative ? "ETH" : ""}</span>
                     </div>
@@ -711,13 +745,13 @@ function renderCampaigns() {
 
       <div class="card-footer">
         <div class="deadline-countdown">
-          <span class="countdown-icon">⏳</span>
+          <span class="countdown-icon"></span>
           <span>${timeText}</span>
         </div>
 
         <div class="card-actions">
           ${c.isFrozen
-            ? `<button class="btn btn-secondary btn-sm" disabled style="opacity: 0.7; color: #f87171; border-color: rgba(239, 68, 68, 0.4); cursor: not-allowed;">❄️ Frozen</button>`
+            ? `<button class="btn btn-secondary btn-sm" disabled style="opacity: 0.7; color: #f87171; border-color: rgba(239, 68, 68, 0.4); cursor: not-allowed;"> Frozen</button>`
             : c.isCompleted
               ? `<button class="btn btn-secondary btn-sm" disabled style="opacity: 0.65; cursor: not-allowed;">Withdrawn & Closed</button>`
               : !isPastDeadline && !isGoalMet
@@ -729,14 +763,14 @@ function renderCampaigns() {
           ${canWithdraw ? `<button class="btn btn-success btn-sm withdraw-btn" data-id="${c.id}">Withdraw</button>` : ""}
           ${isRefundable ? `<button class="btn btn-danger btn-sm refund-btn" data-id="${c.id}">Claim Refund</button>` : ""}
           ${c.donors?.length && !c.isCompleted && (isRefundable || isPastDeadline || !isGoalMet)
-            ? `<button class="btn btn-secondary btn-sm batch-refund-card-btn" data-id="${c.id}" style="color: #f87171; border-color: rgba(239, 68, 68, 0.4); padding: 5px 8px;">⚡ Batch Refund (${c.donors.length})</button>`
+            ? `<button class="btn btn-secondary btn-sm batch-refund-card-btn" data-id="${c.id}" style="color: #f87171; border-color: rgba(239, 68, 68, 0.4); padding: 5px 8px;"> Batch Refund (${c.donors.length})</button>`
             : ""
           }
           ${isCreator && !c.isCompleted && !c.isFrozen
             ? `<button class="btn btn-secondary btn-sm delete-btn" data-id="${c.id}" style="color: #f87171; border-color: rgba(239, 68, 68, 0.35); padding: 5px 8px;">Delete</button>`
             : ""
           }
-          <button class="btn btn-secondary btn-sm freeze-btn" data-id="${c.id}" data-frozen="${c.isFrozen ? "true" : "false"}" style="padding: 5px 8px; font-size: 0.75rem; border-color: ${c.isFrozen ? "rgba(34, 197, 94, 0.4)" : "rgba(239, 68, 68, 0.4)"}; color: ${c.isFrozen ? "#4ade80" : "#fca5a5"};" title="Admin/Reviewer toggle">${c.isFrozen ? "☀️ Unfreeze" : "❄️ Freeze"}</button>
+          <button class="btn btn-secondary btn-sm freeze-btn" data-id="${c.id}" data-frozen="${c.isFrozen ? "true" : "false"}" style="padding: 5px 8px; font-size: 0.75rem; border-color: ${c.isFrozen ? "rgba(34, 197, 94, 0.4)" : "rgba(239, 68, 68, 0.4)"}; color: ${c.isFrozen ? "#4ade80" : "#fca5a5"};" title="Admin/Reviewer toggle">${c.isFrozen ? " Unfreeze" : " Freeze"}</button>
         </div>
       </div>
     `;
@@ -759,7 +793,7 @@ async function loadTransactionHistory() {
   if (!txListContainer) return;
   txListContainer.innerHTML = `
     <div class="empty-state" style="padding: 30px 20px;">
-      <div class="empty-state-icon">⏳</div>
+      <div class="empty-state-icon"></div>
       <h3>Loading Transactions...</h3>
       <p>Reading on-chain event logs...</p>
     </div>
@@ -781,7 +815,7 @@ async function loadTransactionHistory() {
     if (filteredTxs.length === 0) {
       txListContainer.innerHTML = `
         <div class="empty-state" style="padding: 40px 20px;">
-          <div class="empty-state-icon">📭</div>
+          <div class="empty-state-icon"></div>
           <h3>No Transactions Found</h3>
           <p>${activeTxTab === "mine" ? "No transactions found for your connected wallet." : "No transactions match this filter."}</p>
         </div>
@@ -789,11 +823,11 @@ async function loadTransactionHistory() {
       return;
     }
 
-    const typeIcons = { donation: "💸", withdrawal: "💰", refund: "↩️", created: "🚀", canceled: "❌", kyc: "🛡️" };
+    const typeIcons = { donation: "", withdrawal: "", refund: "", created: "", canceled: "", kyc: "️" };
 
     txListContainer.innerHTML = filteredTxs
       .map((t) => {
-        const icon = typeIcons[t.type] || "📄";
+        const icon = typeIcons[t.type] || "";
         const isPos = t.type === "donation" || t.type === "created";
         const amtStr = t.amount && parseFloat(t.amount) > 0 ? `${t.type === "withdrawal" || t.type === "refund" ? "-" : "+"}${t.amount} ${t.token || "ETH"}` : "";
         const isYou = fundMe.userAddress && t.from && fundMe.userAddress.toLowerCase() === t.from.toLowerCase();
@@ -813,9 +847,9 @@ async function loadTransactionHistory() {
                   ${t.hash ? `
                     <span>•</span>
                     <a href="https://sepolia.etherscan.io/tx/${t.hash}" target="_blank" rel="noopener noreferrer" class="tx-hash-link" title="${t.hash}">
-                      ${t.hash.slice(0, 8)}...${t.hash.slice(-6)} ↗
+                      ${t.hash.slice(0, 8)}...${t.hash.slice(-6)} 
                     </a>
-                    <button type="button" class="btn-copy-tx" data-hash="${t.hash}" title="Copy hash" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 0 2px; font-size: 0.75rem;">📋</button>
+                    <button type="button" class="btn-copy-tx" data-hash="${t.hash}" title="Copy hash" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 0 2px; font-size: 0.75rem;"></button>
                   ` : ""}
                 </div>
               </div>
@@ -831,7 +865,7 @@ async function loadTransactionHistory() {
   } catch (err) {
     txListContainer.innerHTML = `
       <div class="empty-state" style="padding: 30px 20px;">
-        <div class="empty-state-icon">⚠️</div>
+        <div class="empty-state-icon">Warning:</div>
         <h3>Failed to load transactions</h3>
         <p>${err.message || "Could not query contract events"}</p>
       </div>
@@ -876,7 +910,7 @@ function updateAdminKycModal() {
   for (const item of uniqueCreators.values()) {
     const opt = document.createElement("option");
     opt.value = item.address;
-    opt.textContent = `${formatAccount(item.address)} (Campaign #${item.campaignId}) — ${item.isKycVerified ? "✓ Verified" : "Unverified"}`;
+    opt.textContent = `${formatAccount(item.address)} (Campaign #${item.campaignId}) — ${item.isKycVerified ? "V Verified" : "Unverified"}`;
     kycCreatorQuickSelect.appendChild(opt);
   }
 }
@@ -903,10 +937,10 @@ async function checkKycAddressStatus(addr) {
   try {
     const isVerified = await fundMe.isKycVerified(addr);
     if (isVerified) {
-      kycStatusResult.innerHTML = '<span style="color: #34d399;">✓ Address is KYC Verified (Eligible for 1% discounted fee)</span>';
+      kycStatusResult.innerHTML = '<span style="color: #34d399;">V Address is KYC Verified (Eligible for 1% discounted fee)</span>';
       if (revokeKycBtn) revokeKycBtn.style.display = "inline-block";
     } else {
-      kycStatusResult.innerHTML = '<span style="color: #f59e0b;">⚠️ Address is Unverified (Standard 5% platform fee)</span>';
+      kycStatusResult.innerHTML = '<span style="color: #f59e0b;">Warning: Address is Unverified (Standard 5% platform fee)</span>';
       if (revokeKycBtn) revokeKycBtn.style.display = "none";
     }
   } catch (err) {
@@ -931,7 +965,7 @@ adminKycForm?.addEventListener("submit", async (e) => {
     verifyKycSubmitBtn.textContent = "Verifying on-chain...";
     showToast(`Granting KYC verified status to ${formatAccount(addr)}...`, "info");
     await fundMe.setKycStatus(addr, true);
-    showToast(`✓ Successfully verified ${formatAccount(addr)}! (1% fee rate applied)`, "success");
+    showToast(`V Successfully verified ${formatAccount(addr)}! (1% fee rate applied)`, "success");
     await checkKycAddressStatus(addr);
     await refreshData();
     await updateTxHistoryCount();
@@ -939,7 +973,7 @@ adminKycForm?.addEventListener("submit", async (e) => {
     showToast(formatTxError(err), "error");
   } finally {
     verifyKycSubmitBtn.disabled = false;
-    verifyKycSubmitBtn.textContent = "✓ Verify Creator (1% Fee)";
+    verifyKycSubmitBtn.textContent = "V Verify Creator (1% Fee)";
   }
 });
 
@@ -962,6 +996,103 @@ revokeKycBtn?.addEventListener("click", async () => {
   } finally {
     revokeKycBtn.disabled = false;
     revokeKycBtn.textContent = "Revoke Verification";
+  }
+});
+
+// Mint Token Modal
+const mintTokenModal = $("mintTokenModal");
+const mintTokenAddressInput = $("mintTokenAddressInput");
+const mintRecipientInput = $("mintRecipientInput");
+const mintTokenInfoLabel = $("mintTokenInfoLabel");
+const mintCurrentBalanceLabel = $("mintCurrentBalanceLabel");
+const mintAmountInput = $("mintAmountInput");
+const mintTokenForm = $("mintTokenForm");
+const submitMintBtn = $("submitMintBtn");
+
+async function updateMintTokenDetails(addr) {
+  if (!addr || !window.ethers.isAddress(addr)) {
+    if (mintTokenInfoLabel) mintTokenInfoLabel.textContent = "Invalid token contract address";
+    if (mintCurrentBalanceLabel) mintCurrentBalanceLabel.textContent = "—";
+    return;
+  }
+  if (mintTokenInfoLabel) mintTokenInfoLabel.textContent = "Loading token details...";
+  try {
+    const details = await fundMe.getTokenDetails(addr, fundMe.userAddress);
+    if (details) {
+      if (mintTokenInfoLabel) mintTokenInfoLabel.textContent = `${details.name} (${details.symbol}) — ${details.decimals} decimals`;
+      if (mintCurrentBalanceLabel) mintCurrentBalanceLabel.textContent = `${parseFloat(details.balance).toFixed(2)} ${details.symbol}`;
+      fundMe.setDefaultTokenAddress(addr);
+    } else {
+      if (mintTokenInfoLabel) mintTokenInfoLabel.textContent = "Mock token (mintable)";
+      if (mintCurrentBalanceLabel) mintCurrentBalanceLabel.textContent = "0.00";
+    }
+  } catch (_) {
+    if (mintTokenInfoLabel) mintTokenInfoLabel.textContent = "Test ERC-20 Token";
+  }
+}
+
+function openMintTokenModal() {
+  if (!fundMe.userAddress) return showToast("Please connect your wallet first", "info");
+  if (mintRecipientInput) mintRecipientInput.value = fundMe.userAddress;
+  const defaultToken = fundMe.getDefaultTokenAddress();
+  if (mintTokenAddressInput) mintTokenAddressInput.value = defaultToken;
+  updateMintTokenDetails(defaultToken);
+  openModal(mintTokenModal);
+}
+
+$("openMintTokenBtn")?.addEventListener("click", openMintTokenModal);
+
+mintTokenAddressInput?.addEventListener("change", (e) => {
+  updateMintTokenDetails(e.target.value.trim());
+});
+
+$("resetDefaultMintTokenBtn")?.addEventListener("click", () => {
+  const def = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853";
+  fundMe.setDefaultTokenAddress(def);
+  if (mintTokenAddressInput) mintTokenAddressInput.value = def;
+  updateMintTokenDetails(def);
+});
+
+document.querySelectorAll("[data-mint-amt]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (mintAmountInput) mintAmountInput.value = btn.getAttribute("data-mint-amt");
+  });
+});
+
+$("addTokenToMetaMaskBtn")?.addEventListener("click", async () => {
+  const addr = mintTokenAddressInput?.value.trim();
+  if (!addr) return showToast("Please enter a token address first", "info");
+  try {
+    await fundMe.addTokenToWallet(addr);
+    showToast("Token add request sent to your wallet!", "success");
+  } catch (err) {
+    showToast(err.message || "Failed to add token to wallet", "error");
+  }
+});
+
+mintTokenForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const tokenAddr = mintTokenAddressInput?.value.trim();
+  const amt = mintAmountInput?.value.trim();
+  if (!tokenAddr || !amt) return;
+
+  try {
+    if (submitMintBtn) {
+      submitMintBtn.disabled = true;
+      submitMintBtn.textContent = "Minting Tokens...";
+    }
+    showToast(`Minting ${amt} test tokens to ${formatAccount(fundMe.userAddress)}...`, "info");
+    await fundMe.mintTokens(tokenAddr, amt);
+    showToast(` Successfully minted ${amt} test tokens!`, "success");
+    await updateMintTokenDetails(tokenAddr);
+    await updateTxHistoryCount();
+  } catch (err) {
+    showToast(formatTxError(err), "error");
+  } finally {
+    if (submitMintBtn) {
+      submitMintBtn.disabled = false;
+      submitMintBtn.textContent = " Mint Tokens";
+    }
   }
 });
 
